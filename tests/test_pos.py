@@ -132,7 +132,7 @@ def test_pos_customer_sync_updates_crm_history(client, lab, eng):
         assert customer.first_store_id == lab["store"]
         assert customer.orders_n == 2 and customer.spend_paise == total["total"] + total2["total"]
         assert str(customer.last_order_on)[:10] == "2026-10-31"
-        earned = (total["total"] + total2["total"]) // 5000
+        earned = total["total"] // 5000 + total2["total"] // 5000
         assert customer.loyalty_points == earned and customer.consent_wa
         txns = db.execute(text("select count(*) from loyalty_txn where sale_id in (:s1,:s2)"), {"s1": b["id"], "s2": b2["id"]}).scalar()
         assert txns == 2
@@ -145,7 +145,7 @@ def test_pos_customer_sync_updates_crm_history(client, lab, eng):
     assert duplicate["status"] == "duplicate"
     with eng.connect() as db:
         after = db.execute(text("select orders_n,spend_paise,loyalty_points from customer where id=:i"), {"i": customer.id}).first()
-        assert tuple(after) == (2, total["total"] + total2["total"], (total["total"] + total2["total"]) // 5000)
+        assert tuple(after) == (2, total["total"] + total2["total"], total["total"] // 5000 + total2["total"] // 5000)
 
 def test_sync_rejections(client, lab):
     h, boot = lab["h"], lab["boot"]; dev = boot["devices"][-1]; g = grant(client, h, dev["id"], 6)
