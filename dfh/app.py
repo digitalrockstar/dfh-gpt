@@ -200,12 +200,12 @@ def create_app(db_url=None, data_dir=None, serve_frontend=True):
     def filters(u, region, tier, city, fmt=""):
         return dict(region=region or None, tier=tier or None, city=city or None, fmt=fmt or None, store_ids=scope(u))
 
-    wa = wastage_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, now=now))
-    da = demand_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, now=now))
-    pos_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, now=now))
-    fa = finance_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, now=now))
-    ca = crm_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, now=now))
-    pa = procurement_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, now=now))
+    wa = wastage_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, "NOW": now))
+    da = demand_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, "NOW": now))
+    pos_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, "NOW": now))
+    fa = finance_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, "NOW": now))
+    ca = crm_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, "NOW": now))
+    pa = procurement_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, "NOW": now))
     ct = need(CT_ROLES)
 
     @app.get("/api/ct/summary")
@@ -247,7 +247,7 @@ def create_app(db_url=None, data_dir=None, serve_frontend=True):
     def ct_exc(region: str = "", tier: str = "", city: str = "", fmt: str = "", u=Depends(ct)):
         return exceptions_for(filters(u, region, tier, city, fmt))
 
-    ct_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, now=now), exceptions_for, ct, filters)
+    ct_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, "NOW": now), exceptions_for, ct, filters)
 
     @app.get("/api/ct/filters")
     def ct_filters(u=Depends(ct)):
