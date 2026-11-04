@@ -174,7 +174,9 @@ def test_inventory_reconciliation_matches_ledger_projection_and_scopes(env):
     assert scoped.status_code == 200 and scoped.json()["checked"] > 0
     assert c.get("/api/inv/reconciliation?location_id=2", headers=wh).status_code == 403
     store_id = q(con, "select scope_id from app_user where username='storemgr'")[0][0]
-    assert c.get(f"/api/inv/reconciliation?location_id={store_id}", headers=sm).status_code == 403
+    other_store = q(con, "select id from location where type='store' and id<>? limit 1", store_id)[0][0]
+    assert c.get(f"/api/inv/reconciliation?location_id={store_id}", headers=sm).status_code == 200
+    assert c.get(f"/api/inv/reconciliation?location_id={other_store}", headers=sm).status_code == 403
     assert c.get("/api/inv/reconciliation", headers=H(c, "cashier")).status_code == 403
 
 
@@ -191,7 +193,7 @@ def test_inventory_reconciliation_detects_projection_drift(env):
     assert d["absolute_variance"] == 7
     assert d["items"][0]["kind"] == "quantity_mismatch"
     # Reconciliation is observational: it does not silently repair or mutate stock.
-    assert q(con, "select qty from stock_balance where location_id=? and sku_id=? and batch_id=?", row[:3])[0][0] == row[3] + 7
+    assert q(con, "select qty from stock_balance where location_id=? and sku_id=? and batch_id=?", *row[:3])[0][0] == row[3] + 7
 
 def test_scope_and_roles(env):
     c, con = env; wh, sm, ca = H(c, "warehouse"), H(c, "storemgr"), H(c, "cashier"); ceo = H(c, "ceo")
