@@ -124,9 +124,9 @@ def attach(app, ctx):
     def summary(u=Depends(ops)):
         st = store_of(u); cw = " and first_store_id=:st" if st is not None else ""; ow = " and fulfil_location_id=:st" if st is not None else ""
         d30, d90 = str(TODAY - timedelta(days=30)), str(TODAY - timedelta(days=90))
-        k = one("select count(*) n, coalesce(sum(consent_wa),0) cons, coalesce(sum(case when last_order_on>=:d90 then 1 else 0 end),0) active90, coalesce(sum(case when created_at>=:d30 then 1 else 0 end),0) new30, "
+        k = one("select count(*) n, coalesce(sum(case when consent_wa then 1 else 0 end),0) cons, coalesce(sum(case when last_order_on>=:d90 then 1 else 0 end),0) active90, coalesce(sum(case when created_at>=:d30 then 1 else 0 end),0) new30, "
                 "coalesce(sum(case when orders_n>=2 then 1 else 0 end),0) rep, coalesce(sum(loyalty_points),0) pts, coalesce(sum(spend_paise),0) spend from customer where 1=1" + cw, d30=d30, d90=d90, st=st)
-        segs = many("select segment, count(*) n, coalesce(sum(spend_paise),0) spend, avg(orders_n) avg_orders, coalesce(sum(consent_wa),0) cons from customer where 1=1" + cw + " group by segment", st=st)
+        segs = many("select segment, count(*) n, coalesce(sum(spend_paise),0) spend, avg(orders_n) avg_orders, coalesce(sum(case when consent_wa then 1 else 0 end),0) cons from customer where 1=1" + cw + " group by segment", st=st)
         order = {s: i for i, s in enumerate(SEGMENTS)}; segs.sort(key=lambda r: order.get(r["segment"], 9))
         w = many("select status, count(*) n, coalesce(sum(total_paise),0) v, min(created_at) oldest from wa_order where created_at>=:d" + ow + " group by status", d=str(NOW - timedelta(days=30)), st=st)
         wm = {r["status"]: r for r in w}
@@ -215,7 +215,7 @@ def attach(app, ctx):
                    dict(c=cid, t=NOW, k=kind, b=body[:1000], tp=template, o=order_id))
 
     def render(cn, code, cust, order=None):
-        t = cn.execute(text("select body from wa_template where code=:c and approved=1"), dict(c=code)).scalar()
+        t = cn.execute(text("select body from wa_template where code=:c and approved=true"), dict(c=code)).scalar()
         if not t: raise HTTPException(422, "That template is not approved")
         return t.format(name=cust["name"] or "there", order_no=(order or {}).get("order_no", ""), total=f"{(order or {}).get('total_paise', 0) / 100:,.0f}", link=(order or {}).get("payment_link", ""))
 
@@ -363,7 +363,7 @@ def attach(app, ctx):
         ms = many("select id, ts, direction, kind, body, template, status, order_id from wa_message where customer_id=:c order by ts, id", c=cid)
         ins = [dt(m["ts"]) for m in ms if m["direction"] == "in"]
         wo = bool(ins and (NOW - max(ins)).total_seconds() / 3600 < WINDOW_H)
-        tp = many("select code, name, category, body from wa_template where approved=1 order by category, name")
+        tp = many("select code, name, category, body from wa_template where approved=true order by category, name")
         return dict(customer=dict(id=c["id"], name=c["name"], phone=c["phone"], city=c["city"], consent_wa=bool(c["consent_wa"]), segment=c["segment"]), messages=ms[-60:], window_open=wo, templates=tp)
 
     @app.post("/api/crm/inbox/{cid}/reply")
@@ -391,7 +391,7 @@ def attach(app, ctx):
 
     # ---------------- campaigns ----------------
     def audience(segment):
-        w = " where consent_wa=1" + ("" if segment == "All" else " and segment=:s")
+        w = " where consent_wa=true" + ("" if segment == "All" else " and segment=:s")
         cut = str(NOW - timedelta(days=FREQ_CAP_DAYS))
         tot = one("select count(*) n from customer" + w, s=segment)["n"]
         sup = one("select count(*) n from customer" + w + " and last_marketing_at>=:c", s=segment, c=cut)["n"]
@@ -407,7 +407,7 @@ def attach(app, ctx):
             r["delivery_pct"] = r["delivered"] / r["sent"] if r["sent"] else None; r["reply_pct"] = r["replied"] / r["sent"] if r["sent"] else None; r["optout_pct"] = r["optouts"] / r["sent"] if r["sent"] else None
             r["needs_approval"] = r["segment"] == "All" or r["eligible"] > CAMPAIGN_APPROVAL
         med = sorted(r["optout_pct"] for r in rows if r["optout_pct"] is not None)
-        return dict(items=rows, median_optout=(med[len(med) // 2] if med else None), templates=many("select code, name, body from wa_template where approved=1 and category='marketing' order by name"), segments=SEGMENTS + ["All"])
+        return dict(items=rows, median_optout=(med[len(med) // 2] if med else None), templates=many("select code, name, body from wa_template where approved=true and category='marketing' order by name"), segments=SEGMENTS + ["All"])
 
     @app.post("/api/crm/campaigns")
     def campaign_create(b: CampaignIn, u=Depends(mkt)):
@@ -444,7 +444,7 @@ def attach(app, ctx):
         if (c["segment"] == "All" or elig > CAMPAIGN_APPROVAL) and u["role"] not in BIG_ROLES:
             raise HTTPException(403, "Broad sends and audiences above " + f"{CAMPAIGN_APPROVAL:,}" + " need the CEO or admin")
         if elig <= 0: raise HTTPException(422, "Nobody is eligible. Everyone in this segment either has not opted in or was messaged in the last 7 days")
-        w = " where consent_wa=1 and (last_marketing_at is null or last_marketing_at<:cut)" + ("" if c["segment"] == "All" else " and segment=:s")
+        w = " where consent_wa=true and (last_marketing_at is null or last_marketing_at<:cut)" + ("" if c["segment"] == "All" else " and segment=:s")
         with engine.begin() as cn:
             cn.execute(text("update customer set last_marketing_at=:t" + w), dict(t=NOW, cut=str(NOW - timedelta(days=FREQ_CAP_DAYS)), s=c["segment"]))
             cn.execute(text("update campaign set status='queued', sent=:e, audience=:a, suppressed=:s, approved_by=:u, scheduled_at=coalesce(scheduled_at,:t) where id=:i"), dict(e=elig, a=a, s=s, u=u["id"], t=NOW, i=cid))
