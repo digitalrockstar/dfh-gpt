@@ -167,6 +167,9 @@ def attach(app, ctx):
         old = one("select * from approval_rule where id=:i", i=rid)
         if not old:
             raise HTTPException(404, "Rule not found")
+        pending = one("select count(*) n from approval_request where doc_type=:d and status='pending' and amount_paise>=:lo and (:hi is null or amount_paise<=:hi)", d=old["doc_type"], lo=old["min_amount_paise"], hi=old["max_amount_paise"])
+        if pending["n"]:
+            raise HTTPException(409, "Resolve pending requests covered by this rule before removing it")
         with engine.begin() as c:
             c.execute(__import__("sqlalchemy").text("delete from approval_rule where id=:i"), {"i":rid})
             audit(c,u,"delete","approval_rule",rid,old,None)
@@ -178,14 +181,14 @@ def attach(app, ctx):
         where = " where 1=1" + (" and a.status=:s" if status else "")
         p={"s":status} if status else {}
         total=one("select count(*) n from approval_request a"+where,**p)["n"]
-        items=many("select a.id,a.doc_type,a.doc_id,a.status,a.amount_paise,a.created_at,a.decided_at,a.note,req.username requested_by,ap.username approver,rr.code approver_role "
+        items=many("select a.id,a.doc_type,a.doc_id,a.status,a.amount_paise,a.created_at,a.decided_at,a.note,a.requested_by requested_by_id,req.username requested_by,ap.username approver,rr.code approver_role "
                    "from approval_request a left join app_user req on req.id=a.requested_by left join app_user ap on ap.id=a.approver_id "
                    "left join approval_rule ar on ar.doc_type=a.doc_type and ar.min_amount_paise<=a.amount_paise and (ar.max_amount_paise is null or ar.max_amount_paise>=a.amount_paise) "
                    "left join role rr on rr.id=ar.approver_role_id"+where+" order by a.created_at desc,a.id desc limit :lim offset :off",
                    **p,lim=size,off=(page-1)*size)
         for x in items:
-            x["can_decide"] = u["role"] in ADMINS or x["approver_role"] == u["role"]
-            x["is_self"] = False
+            x["is_self"] = x["requested_by_id"] == u["id"]
+            x["can_decide"] = not x["is_self"] and (u["role"] in ADMINS or x["approver_role"] == u["role"])
         return dict(items=items,total=total,page=page,size=size)
 
     @app.post("/api/platform/approvals")
@@ -218,8 +221,10 @@ def attach(app, ctx):
         if b.decision=="reject" and not (b.note or "").strip():
             raise HTTPException(422,"A reason is required when rejecting")
         with engine.begin() as c:
-            c.execute(__import__("sqlalchemy").text("update approval_request set status=:s,approver_id=:u,decided_at=:t,note=:n where id=:i and status='pending'"),
-                      dict(s="approved" if b.decision=="approve" else "rejected",u=u["id"],t=NOW,n=b.note,i=aid))
+            result = c.execute(__import__("sqlalchemy").text("update approval_request set status=:s,approver_id=:u,decided_at=:t,note=:n where id=:i and status='pending'"),
+                                dict(s="approved" if b.decision=="approve" else "rejected",u=u["id"],t=NOW,n=b.note,i=aid))
+            if result.rowcount != 1:
+                raise HTTPException(409, "This request has already been decided")
             audit(c,u,b.decision,"approval_request",aid,{"status":"pending"},{"status":"approved" if b.decision=="approve" else "rejected","note":b.note})
         return dict(id=aid,status="approved" if b.decision=="approve" else "rejected")
 
