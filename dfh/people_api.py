@@ -213,8 +213,9 @@ def attach(app, ctx):
         extra,params=scoped(u)
         if extra and not many("select e.id from employee e where e.id=:i"+extra,i=r["employee_id"],**params): raise HTTPException(404,"Leave request not found")
         if r["status"]!="pending": raise HTTPException(409,"This request has already been decided")
+        approver = one("select employee_id from app_user where id=:i", i=u["id"])
         with engine.begin() as c:
-            c.execute(text("update leave_request set status=:s,approver_id=:u where id=:i"),{"s":"approved" if b.decision=="approve" else "rejected","u":u["id"],"i":rid})
+            c.execute(text("update leave_request set status=:s,approver_id=:u where id=:i"),{"s":"approved" if b.decision=="approve" else "rejected","u":approver["employee_id"] if approver else None,"i":rid})
             audit(c,u,b.decision,"leave_request",rid,serial(dict(r)),{"status":"approved" if b.decision=="approve" else "rejected","note":b.note})
         return dict(id=rid,status="approved" if b.decision=="approve" else "rejected")
 
