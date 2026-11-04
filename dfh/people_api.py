@@ -98,7 +98,7 @@ def attach(app, ctx):
         extra, params = scoped(u)
         base = " from employee e where e.status='active'" + extra
         staff = one("select count(*) n" + base, **params)["n"]
-        today_att = one("select count(*) n, sum(case when status in ('present','late','half_day') then 1 else 0 end) present, sum(case when status='absent' then 1 else 0 end) absent from attendance a join employee e on e.id=a.employee_id where a.date=:d" + extra.replace("e.location_id", "e.location_id"), d=today, **params)
+        today_att = one("select count(*) n, sum(case when a.status in ('present','late','half_day') then 1 else 0 end) present, sum(case when a.status='absent' then 1 else 0 end) absent from attendance a join employee e on e.id=a.employee_id where a.date=:d" + extra.replace("e.location_id", "e.location_id"), d=today, **params)
         pending = one("select count(*) n from leave_request r join employee e on e.id=r.employee_id where r.status='pending'" + extra, **params)["n"]
         onboarding = one("select count(*) n from onboarding_task t join employee e on e.id=t.employee_id where t.done_at is null" + extra, **params)["n"]
         jobs = one("select count(*) n from job_posting where status='open'")["n"]
