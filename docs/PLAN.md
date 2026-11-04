@@ -20,7 +20,8 @@ Full product plan: `docs/DFH_Product_Plan_v1.pdf` (25 pages; source `docs/build_
 
 ## Next integration hardening
 - DONE: link synced POS bills to CRM customer purchase history and expose bill-level sales, average bill value, SKU lines per bill, payment tenders and returns to analytics. POS transaction metrics remain separate from aggregate Parquet KPIs to prevent double-counting.
-- NEXT: reconcile all operational stock movements to the inventory ledger and retire remaining snapshot-based stock positions where the ledger is authoritative.
+- DONE: reconcile operational stock movements to the inventory ledger with the read-only Inventory > Reconciliation workspace (PR #16).
+- NEXT: retire the remaining snapshot-based stock positions where the ledger is authoritative, beginning with demand/replenishment availability and its GRN/sales/transfer update paths.
 
 ## Definition of done per module
 Tables seeded, API with tests, screens in all themes, edge cases listed in the PDF covered or listed as open, entry in UPDATES.md.
