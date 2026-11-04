@@ -6,6 +6,7 @@ from fastapi import Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
 from . import stockpost
+from .sql_dialect import days_between, date_plus_literal_days
 from .procurement_costs import Rates, components, line_minor, weight_kg, allocate, match, FLOW, STAGE, COMPONENTS
 
 VIEW = {"ceo", "finance", "admin", "procurement", "warehouse"}
@@ -142,8 +143,9 @@ def attach(app, ctx):
                     po_limit=PO_LIMIT, big_roles=sorted(BIG), flow=FLOW, stage=STAGE, tolerance=rates().tol)
 
     def ship_sql(extra=""):
+        late_days_expr = days_between(engine, ":t", "sh.eta")
         return ("select sh.id, sh.ship_no, sh.po_id, sh.mode, sh.container_no, sh.status, sh.etd, sh.eta, sh.ata, sh.bl_no, p.po_no, p.total_minor, p.fx_rate, p.status po_status, p.dest_location_id, v.name vendor, v.country, l.name wh_name, l.city wh_city, "
-                "case when sh.status!='delivered' and sh.eta < :t then cast(julianday(:t) - julianday(sh.eta) as int) else 0 end late_days, "
+                f"case when sh.status!='delivered' and sh.eta < :t then {late_days_expr} else 0 end late_days, "
                 "(select max(ts) from shipment_event e where e.shipment_id=sh.id) last_ts "
                 "from shipment sh join purchase_order p on p.id=sh.po_id join vendor v on v.id=p.vendor_id join location l on l.id=p.dest_location_id" + extra)
 
@@ -278,7 +280,8 @@ def attach(app, ctx):
         tot = one(f"select count(*) n from shipment sh join purchase_order p on p.id=sh.po_id where {cond}{w}", lt=lt)["n"]
         for r in rows:
             fl = FLOW[r["mode"]]; r["step"] = fl.index(r["status"]); r["steps"] = len(fl); r["value_inr"] = inr(r["total_minor"], r["fx_rate"])
-            r["stuck"] = r["status"] == "customs" and one("select cast(julianday(:t) - julianday(max(ts)) as int) d from shipment_event where shipment_id=:s and status='customs'", t=str(TODAY), s=r["id"])["d"] or 0
+            stuck_days_expr = days_between(engine, ":t", "max(ts)")
+            r["stuck"] = r["status"] == "customs" and one(f"select {stuck_days_expr} d from shipment_event where shipment_id=:s and status='customs'", t=str(TODAY), s=r["id"])["d"] or 0
         return dict(total=tot, items=rows)
 
     @app.post("/api/procurement/pos/{pid}/shipment")
@@ -510,7 +513,8 @@ def attach(app, ctx):
     @app.get("/api/procurement/vendors")
     def vendors(u=Depends(view)):
         base = {r["id"]: r for r in many("select v.id, v.name, v.country, v.type, count(p.id) pos, coalesce(sum(p.total_minor * p.fx_rate), 0) value from vendor v join purchase_order p on p.vendor_id=v.id where p.status != 'cancelled' group by v.id")}
-        ot = {r["vendor_id"]: r for r in many("select p.vendor_id, count(*) n, sum(case when sh.ata <= date(sh.eta, '+2 day') then 1 else 0 end) ok from shipment sh join purchase_order p on p.id=sh.po_id where sh.ata is not null group by 1")}
+        eta_plus_two = date_plus_literal_days(engine, "sh.eta", 2)
+        ot = {r["vendor_id"]: r for r in many(f"select p.vendor_id, count(*) n, sum(case when sh.ata <= {eta_plus_two} then 1 else 0 end) ok from shipment sh join purchase_order p on p.id=sh.po_id where sh.ata is not null group by 1")}
         fl = {r["vendor_id"]: r for r in many("select p.vendor_id, sum(gl.qty_received) rec, sum(gl.qty_rejected) rj, sum(pl.qty) ord from grn g join purchase_order p on p.id=g.po_id join grn_line gl on gl.grn_id=g.id join purchase_order_line pl on pl.po_id=p.id and pl.sku_id=gl.sku_id group by 1")}
         pay = {}
         for i in inv_rows("i.status in ('pending','held','released')", u): pay[i["vendor_id"]] = pay.get(i["vendor_id"], 0) + i["amount_inr"]
@@ -537,7 +541,8 @@ def attach(app, ctx):
         if f["store_ids"] is not None: return out
         t = str(TODAY)
         for s in many(ship_sql(" where sh.status='customs' and p.status != 'cancelled'"), t=t):
-            days = one("select cast(julianday(:t) - julianday(max(ts)) as int) d from shipment_event where shipment_id=:s and status='customs'", t=t, s=s["id"])["d"] or 0
+            customs_days_expr = days_between(engine, ":t", "max(ts)")
+            days = one(f"select {customs_days_expr} d from shipment_event where shipment_id=:s and status='customs'", t=t, s=s["id"])["d"] or 0
             if days >= 5: out.append(dict(type="customs", severity="high", title=f"{s['ship_no']} has been in customs for {days} days", detail=f"{s['vendor']} to {s['wh_name']}, worth {inr(s['total_minor'], s['fx_rate']) / 1e7:.2f} Cr. ETA was {d(s['eta'])}. Demurrage and storage charges build up daily.", ref=s["po_no"]))
         late = [s for s in many(ship_sql(" where sh.status != 'delivered' and sh.eta < :lt and p.status != 'cancelled'"), t=t, lt=str(TODAY - timedelta(days=7))) if s["status"] != "customs"]
         if late:
