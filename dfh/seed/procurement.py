@@ -25,7 +25,8 @@ def run(engine, seed=42, outdir="data"):
         fx = {(r["currency"], str(r["month"])[:7]): r["rate_to_inr"] for r in q("select currency, month, rate_to_inr from fx_rate")}
         whs = [w for w in q("select id, code, is_port, country from location where type='warehouse'") if w["country"] == "India"]
         users = {r["username"]: r["id"] for r in q("select username, id from app_user")}
-        f2 = json.loads(c.execute(text("select params from demo_finding where code='F2'")).scalar())["vendor_id"]
+        params = c.execute(text("select params from demo_finding where code='F2'")).scalar()
+        f2 = (json.loads(params) if isinstance(params, (str, bytes, bytearray)) else params)["vendor_id"]
         bid = c.execute(text("select coalesce(max(id), 0) from batch")).scalar()
     R = Rates()
     byvs, vskus = {}, {}
