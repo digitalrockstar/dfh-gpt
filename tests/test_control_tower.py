@@ -95,3 +95,41 @@ def test_snapshot(client):
     assert client.get("/api/ct/snapshot?save=1", headers=h).json()["saved"]
     assert client.get("/api/ct/snapshot?save=1", headers=tok(client, "finance")).json()["saved"] is False
     with create_engine(DB).connect() as c: assert c.execute(text("select count(*) from kpi_snapshot")).scalar() == 4
+
+def test_pos_bill_analytics_are_separate_and_scoped(client):
+    h = tok(client)
+    with create_engine(DB).connect() as db:
+        store = db.execute(text("select store_id from sale where status!='void' group by store_id order by count(*) desc limit 1")).scalar()
+        expected = db.execute(text("select count(*),coalesce(sum(net_paise),0),coalesce(avg(net_paise),0) from sale where store_id=:s and status!='void' and business_date between '2026-10-02' and '2026-10-31'"), {"s": store}).first()
+        sale = db.execute(text("select id,invoice_no from sale where store_id=:s and status!='void' order by created_at_device desc limit 1"), {"s": store}).first()
+    d = client.get(f"/api/ct/store/{store}?days=30", headers=h)
+    assert d.status_code == 200
+    ps = d.json()["pos_summary"]
+    assert ps["separate_from_parquet"] is True and ps["source"] == "POS transactions only"
+    assert ps["bills"] == expected[0] and ps["sales_paise"] == expected[1]
+    assert ps["avg_bill_paise"] == int(expected[2])
+    assert client.get("/api/ct/bills?size=100", headers=h).json()["total"] > 0
+    detail = client.get(f"/api/ct/bills/{sale.id}", headers=h)
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["bill"]["invoice_no"] == sale.invoice_no and body["lines"] and body["payments"]
+    assert body["source"].startswith("POS transaction detail")
+    assert all(x["qty_label"].endswith(("kg", "units")) for x in body["lines"])
+    assert client.get("/api/ct/bills?store_id=22", headers=tok(client, "storemgr")).status_code == 403
+
+
+def test_pos_bill_list_excludes_voids(client):
+    h = tok(client)
+    with create_engine(DB).begin() as db:
+        row = db.execute(text("select id,store_id,status from sale where status!='void' limit 1")).first()
+        assert row is not None
+        before = client.get(f"/api/ct/bills?store_id={row.store_id}&size=100", headers=h).json()["total"]
+        db.execute(text("update sale set status='void' where id=:i"), {"i": row.id})
+    try:
+        after = client.get(f"/api/ct/bills?store_id={row.store_id}&size=100", headers=h).json()["total"]
+        assert after == before - 1
+        assert client.get(f"/api/ct/bills/{row.id}", headers=h).status_code == 200
+    finally:
+        with create_engine(DB).begin() as db:
+            db.execute(text("update sale set status=:s where id=:i"), {"s": row.status, "i": row.id})
+
