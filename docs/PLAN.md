@@ -19,7 +19,8 @@ Full product plan: `docs/DFH_Product_Plan_v1.pdf` (25 pages; source `docs/build_
 12. Module 10 Platform operations (access administration, approval rules and decisions, audit viewer, device and import health, entities and FX). DONE.
 
 ## Next integration hardening
-- Link synced POS bills to CRM customer purchase history and make bill-level sales available to analytics, without double-counting the aggregate Parquet history.
+- DONE: link synced POS bills to CRM customer purchase history and expose bill-level sales, average bill value, SKU lines per bill, payment tenders and returns to analytics. POS transaction metrics remain separate from aggregate Parquet KPIs to prevent double-counting.
+- NEXT: reconcile all operational stock movements to the inventory ledger and retire remaining snapshot-based stock positions where the ledger is authoritative.
 
 ## Definition of done per module
 Tables seeded, API with tests, screens in all themes, edge cases listed in the PDF covered or listed as open, entry in UPDATES.md.
