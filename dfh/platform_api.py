@@ -79,7 +79,7 @@ def attach(app, ctx):
             pending_approvals=one("select count(*) n, coalesce(sum(amount_paise),0) amount from approval_request where status='pending'"),
             audit_today=one("select count(*) n from audit_log where ts>=:s", s=str(datetime.combine(today, datetime.min.time()))),
             imports=one("select count(*) n, sum(case when status in ('queued','running','failed') then 1 else 0 end) attention from import_job"),
-            devices=one("select count(*) n, sum(case when active=1 then 1 else 0 end) active from device"),
+            devices=one("select count(*) n, sum(case when active then 1 else 0 end) active from device"),
             stale_devices=one("select count(*) n from device where active=true and (last_seen_at is null or last_seen_at<:cut)", cut=str(NOW-timedelta(hours=24))),
             entities=one("select count(*) n from legal_entity"),
             latest_audit=many("select a.id,a.ts,a.action,a.table_name,a.row_id,u.username,u.name from audit_log a left join app_user u on u.id=a.user_id order by a.ts desc,a.id desc limit 8"))
@@ -176,7 +176,7 @@ def attach(app, ctx):
     def approvals(status: str = "pending", page: int = 1, size: int = 30, u=Depends(reader)):
         page,size=pager(page,size)
         where = " where 1=1" + (" and a.status=:s" if status else "")
-        p={"s":status}
+        p={"s":status} if status else {}
         total=one("select count(*) n from approval_request a"+where,**p)["n"]
         items=many("select a.id,a.doc_type,a.doc_id,a.status,a.amount_paise,a.created_at,a.decided_at,a.note,req.username requested_by,ap.username approver,rr.code approver_role "
                    "from approval_request a left join app_user req on req.id=a.requested_by left join app_user ap on ap.id=a.approver_id "
