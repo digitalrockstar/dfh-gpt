@@ -138,7 +138,7 @@ def attach(app, ctx):
     def options(u=Depends(view)):
         sc = wh(u)
         return dict(warehouses=many("select id, name, city, is_port from location where type='warehouse'" + (f" and id in ({inl(sc)})" if sc else "") + " order by name"),
-                    vendors=many("select id, name, type from vendor where active=1 order by name"), categories=many("select code, name from category order by id"),
+                    vendors=many("select id, name, type from vendor where active=true order by name"), categories=many("select code, name from category order by id"),
                     can_po=u["role"] in PO_WRITE, can_receive=u["role"] in GRN_ROLES, can_release=u["role"] in INV_RELEASE, can_hold=u["role"] in INV_HOLD, can_landed=u["role"] in LANDED_ROLES,
                     po_limit=PO_LIMIT, big_roles=sorted(BIG), flow=FLOW, stage=STAGE, tolerance=rates().tol)
 
