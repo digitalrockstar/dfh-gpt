@@ -85,7 +85,10 @@ def create_app(db_url=None, data_dir=None, serve_frontend=True):
     @app.post("/api/login")
     def login(b: LoginIn):
         u = one("select u.id, u.name, u.password_hash, r.code role from app_user u join role r on r.id=u.role_id where u.username=:n and u.active=1", n=b.username.strip().lower())
-        if not u or u["password_hash"] != auth.hash_pw(b.password): raise HTTPException(401, "Wrong username or password")
+        if not u or not auth.verify_pw(b.password, u["password_hash"]): raise HTTPException(401, "Wrong username or password")
+        if auth.needs_rehash(u["password_hash"]):
+            with engine.begin() as c:
+                c.execute(text("update app_user set password_hash=:h where id=:i"), {"h": auth.hash_pw(b.password), "i": u["id"]})
         return dict(token=auth.make_token(u["id"]), name=u["name"], role=u["role"])
 
     @app.get("/api/me")
