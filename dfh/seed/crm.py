@@ -138,14 +138,14 @@ def run(eng, seed=42, data="data"):
                  ("Corporate gifting reminder", "diwali_gift_promo", "Loyal", NOW + timedelta(days=2, hours=1), "scheduled", None, None, None),
                  ("Dhanteras early look", "diwali_gift_promo", "Regular", None, "draft", None, None, None)]
         for nm, tp, seg, at, stt, dl, rp, oo in camps:
-            q = "select count(*) from customer where consent_wa=1" + ("" if seg == "All" else " and segment=:s")
+            q = "select count(*) from customer where consent_wa=true" + ("" if seg == "All" else " and segment=:s")
             aud = c.execute(text(q), dict(s=seg)).scalar()
             sent = int(aud * rng.uniform(0.85, 1.0)) if stt == "sent" else 0
             c.execute(text("insert into campaign(name, template, segment, scheduled_at, status, sent, delivered, replied, audience, suppressed, optouts, created_by, approved_by, created_at) values (:n,:t,:s,:a,:st,:se,:d,:r,:au,0,:o,:cb,:ab,:ca)"),
                       dict(n=nm, t=tp, s=seg, a=at, st=stt, se=sent, d=int(sent * dl) if dl else 0, r=int(sent * rp) if rp else 0, au=aud, o=int(sent * oo) if oo else 0, cb=8, ab=(1 if stt == "sent" else None), ca=(at - timedelta(days=1) if at else NOW)))
         # frequency cap: the Diwali gift box campaign (3 days ago) reached 90 percent of consented Loyal customers, the broad blast 10 days ago reached everyone consented
-        c.execute(text("update customer set last_marketing_at=:t where consent_wa=1 and segment='Loyal' and (id % 10) != 0"), dict(t=NOW - timedelta(days=3)))
-        c.execute(text("update customer set last_marketing_at=:t where consent_wa=1 and last_marketing_at is null"), dict(t=NOW - timedelta(days=10)))
+        c.execute(text("update customer set last_marketing_at=:t where consent_wa=true and segment='Loyal' and (id % 10) != 0"), dict(t=NOW - timedelta(days=3)))
+        c.execute(text("update customer set last_marketing_at=:t where consent_wa=true and last_marketing_at is null"), dict(t=NOW - timedelta(days=10)))
 
         # corporate gifting quotes
         kits = [dict(r._mapping) for r in c.execute(text("select id, name, mrp_paise from sku where procurement_type='kit' and status='active' and mrp_paise is not null order by mrp_paise"))]
