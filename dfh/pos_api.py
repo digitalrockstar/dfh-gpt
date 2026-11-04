@@ -174,15 +174,20 @@ def attach(app, ctx):
         if any(p.mode not in MODES or p.amount_paise <= 0 for p in b.payments): return "rejected", "Bad payment line"
         if sum(p.amount_paise for p in b.payments) != t["total"]: return "rejected", "Payments do not add up to the bill total"
         cust = None
+        consent_granted = False
         if b.customer_phone:
             ph = "".join(ch for ch in b.customer_phone if ch.isdigit())[-10:]
             if len(ph) == 10:
-                r = c.execute(text("select id from customer where phone=:p"), dict(p=ph)).fetchone()
-                if r: cust = r[0]
+                r = c.execute(text("select id, consent_wa from customer where phone=:p"), dict(p=ph)).fetchone()
+                if r:
+                    cust = r[0]
+                    consent_granted = bool(b.consent_wa and not r[1])
                 else:
+                    city = c.execute(text("select city from location where id=:s"), dict(s=d["store_id"])).scalar() or "Unknown"
                     c.execute(text("insert into customer(code, phone, city, created_at, first_store_id, consent_wa, consent_at, loyalty_points) values (:c,:p,:ci,:t,:s,:w,:ct,0)"),
-                              dict(c="W" + ph, p=ph, ci=None, t=now, s=d["store_id"], w=b.consent_wa, ct=now if b.consent_wa else None))
+                              dict(c="W" + ph, p=ph, ci=city, t=now, s=d["store_id"], w=b.consent_wa, ct=now if b.consent_wa else None))
                     cust = c.execute(text("select id from customer where phone=:p"), dict(p=ph)).scalar()
+                    consent_granted = bool(b.consent_wa)
         # stock: sell FEFO from the store balance, kits come out as their components. A shortfall flags the bill, it does not refuse it.
         today = str(now.date())
         for l in lines:
@@ -202,6 +207,31 @@ def attach(app, ctx):
                       dict(s=b.id, bt=l["batch"], k=l["sku_id"], q=l["qty"], u=l["unit"], d=l["discount"], r=l["rate"], t=l["tax"], n=l["net"], h=l["hsn"]))
         for p in b.payments:
             c.execute(text("insert into payment(sale_id, mode, amount_paise, ref, status) values (:s,:m,:a,:r,'ok')"), dict(s=b.id, m=p.mode, a=p.amount_paise, r=p.ref))
+        if cust:
+            cr = c.execute(text("select created_at, orders_n, spend_paise, last_order_on, loyalty_points, segment, consent_wa from customer where id=:i"), dict(i=cust)).mappings().one()
+            created_at = cr["created_at"] if isinstance(cr["created_at"], datetime) else datetime.fromisoformat(str(cr["created_at"]).replace("Z", ""))
+            last_day = cr["last_order_on"]
+            if last_day and not isinstance(last_day, date): last_day = date.fromisoformat(str(last_day)[:10])
+            last_day = max(last_day, created.date()) if last_day else created.date()
+            orders = int(cr["orders_n"] or 0) + 1
+            spend = int(cr["spend_paise"] or 0) + t["total"]
+            recency = max((now.date() - last_day).days, 0)
+            age = max((now.date() - created_at.date()).days, 0)
+            segment = "New" if age <= 30 else "One-time" if orders == 1 else "Lapsing" if recency > 75 else "Loyal" if orders >= 6 and recency <= 45 else "Regular"
+            # Assumption: one loyalty point per Rs 50 spent.
+            earned = t["total"] // 5000
+            points = int(cr["loyalty_points"] or 0) + earned
+            consent = bool(cr["consent_wa"] or b.consent_wa)
+            c.execute(text("update customer set first_store_id=coalesce(first_store_id,:st),orders_n=:o,spend_paise=:sp,last_order_on=:last,segment=:seg,loyalty_points=:pts,consent_wa=:cw,consent_at=case when :grant then :now else consent_at end where id=:i"),
+                      dict(st=d["store_id"],o=orders,sp=spend,last=last_day,seg=segment,pts=points,cw=consent,grant=consent_granted,now=now,i=cust))
+            audit(c,u,"pos.purchase","customer",cust,
+                  dict(orders_n=cr["orders_n"],spend_paise=cr["spend_paise"],last_order_on=str(cr["last_order_on"]) if cr["last_order_on"] else None,loyalty_points=cr["loyalty_points"],segment=cr["segment"]),
+                  dict(orders_n=orders,spend_paise=spend,last_order_on=str(last_day),loyalty_points=points,segment=segment))
+            if earned:
+                c.execute(text("insert into loyalty_txn(customer_id,sale_id,points,ts,kind,note) values (:c,:s,:p,:t,'earn',:n)"),
+                          dict(c=cust,s=b.id,p=earned,t=now,n="POS bill " + b.invoice_no))
+            if consent_granted:
+                audit(c,u,"consent.grant","customer",cust,{"consent_wa":False},{"consent_wa":True,"source":"pos"})
         late = c.execute(text("select 1 from day_close where store_id=:s and business_date=:d and status!='open'"), dict(s=d["store_id"], d=created.date())).fetchone()
         if late: audit(c, u, "pos.late_bill", "sale", b.id, None, dict(invoice_no=b.invoice_no, business_date=str(created.date())))
         return status, "; ".join(flags) or None

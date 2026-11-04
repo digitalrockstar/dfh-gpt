@@ -106,6 +106,47 @@ def test_series_and_sync_idempotent(client, lab):
     assert det["tax_paise"] == t1["tax"] and det["returnable"] is True
 
 
+
+def test_pos_customer_sync_updates_crm_history(client, lab, eng):
+    h, boot = lab["h"], lab["boot"]
+    dev = boot["devices"][0]
+    g = grant(client, h, dev["id"], 2)
+    d = dict(dev, prefix=g["prefix"])
+    pack = pick(boot, "ea")[0]
+    phone = "98" + f"{uuid.uuid4().int % 100000000:08d}"
+    with eng.connect() as db:
+        assert db.execute(text("select 1 from customer where phone=:p"), {"p": phone}).first() is None
+    b, total = make_bill(boot, d, g["start"], [(pack, 1, 0)], when=datetime(2026, 10, 31, 12))
+    b["customer_phone"] = phone
+    b["consent_wa"] = True
+    pushed = client.post("/api/pos/sync", json=dict(device_id=dev["id"], bills=[b]), headers=h).json()["results"][0]
+    assert pushed["status"] in ("accepted", "review")
+    b2, total2 = make_bill(boot, d, g["start"] + 1, [(pack, 2, 0)], when=datetime(2026, 10, 31, 13))
+    b2["customer_phone"] = phone
+    second = client.post("/api/pos/sync", json=dict(device_id=dev["id"], bills=[b2]), headers=h).json()["results"][0]
+    assert second["status"] in ("accepted", "review")
+    with eng.connect() as db:
+        customer = db.execute(text("select id,city,first_store_id,orders_n,spend_paise,last_order_on,loyalty_points,consent_wa from customer where phone=:p"), {"p": phone}).first()
+        assert customer is not None
+        assert customer.city == boot["store"]["city"]
+        assert customer.first_store_id == lab["store"]
+        assert customer.orders_n == 2 and customer.spend_paise == total["total"] + total2["total"]
+        assert str(customer.last_order_on)[:10] == "2026-10-31"
+        earned = total["total"] // 5000 + total2["total"] // 5000
+        assert customer.loyalty_points == earned and customer.consent_wa
+        txns = db.execute(text("select count(*) from loyalty_txn where sale_id in (:s1,:s2)"), {"s1": b["id"], "s2": b2["id"]}).scalar()
+        assert txns == 2
+    detail = client.get(f"/api/crm/customers/{customer.id}", headers=h)
+    assert detail.status_code == 200, detail.text
+    pos_rows = [x for x in detail.json()["purchases"] if x["source"] == "pos"]
+    assert len(pos_rows) == 2 and {x["invoice_no"] for x in pos_rows} == {b["invoice_no"], b2["invoice_no"]}
+    assert detail.json()["months"] and detail.json()["months"][-1]["v"] == total["total"] + total2["total"]
+    duplicate = client.post("/api/pos/sync", json=dict(device_id=dev["id"], bills=[b]), headers=h).json()["results"][0]
+    assert duplicate["status"] == "duplicate"
+    with eng.connect() as db:
+        after = db.execute(text("select orders_n,spend_paise,loyalty_points from customer where id=:i"), {"i": customer.id}).first()
+        assert tuple(after) == (2, total["total"] + total2["total"], total["total"] // 5000 + total2["total"] // 5000)
+
 def test_sync_rejections(client, lab):
     h, boot = lab["h"], lab["boot"]; dev = boot["devices"][-1]; g = grant(client, h, dev["id"], 6)
     d = dict(dev, prefix=g["prefix"]); pack = pick(boot, "ea")[0]
