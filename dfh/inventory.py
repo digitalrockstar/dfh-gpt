@@ -7,6 +7,7 @@ from typing import List, Optional
 from fastapi import Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
+from .sql_dialect import days_between
 
 READ = {"ceo", "finance", "admin", "procurement", "warehouse", "store_manager"}
 WRITE = {"ceo", "admin", "warehouse"}
@@ -196,7 +197,7 @@ def register(app, engine, one, many, me, need, audit, NOW):
         ref = ("select sku_id, min_qty mn, max_qty mx from store_assortment where store_id=:l" if L["type"] == "store" else
                "select sa.sku_id, sum(sa.min_qty) mn, sum(sa.max_qty) mx from store_assortment sa join location st on st.id=sa.store_id where st.serving_wh_id=:l group by sa.sku_id")
         rows = many(f"select s.id, s.code, s.name, c.code cat, c.name cat_name, s.base_uom, s.status, coalesce(h.qty,0) qty, coalesce(h.batches,0) batches, h.first_exp, coalesce(h.value,0) value, m.mn min_qty, m.mx max_qty, "
-                    "case when h.first_exp is not null then cast(julianday(h.first_exp)-julianday(:d) as integer) end days_left from sku s join product p on p.id=s.product_id join category c on c.id=p.category_id "
+                    "case when h.first_exp is not null then {days_between(engine, "h.first_exp", ":d")} end days_left from sku s join product p on p.id=s.product_id join category c on c.id=p.category_id "
                     f"left join (select b.sku_id, sum(b.qty) qty, count(*) batches, min(bt.expiry_date) first_exp, sum({val('b.qty', 'bt.unit_cost_paise', 'sx.base_uom')}) value from stock_balance b join batch bt on bt.id=b.batch_id join sku sx on sx.id=b.sku_id where b.location_id=:l and b.qty>0 group by b.sku_id) h on h.sku_id=s.id "
                     f"left join ({ref}) m on m.sku_id=s.id where h.sku_id is not null or m.mn is not null", l=location_id, d=TODAY)
         for r in rows:
@@ -219,7 +220,7 @@ def register(app, engine, one, many, me, need, audit, NOW):
         a = allowed(u); lf = "" if a is None else f" and b.location_id in {inlist(a)}"
         s["locations"] = many(f"select l.id, l.code, l.name, l.type, sum(b.qty) qty, sum({val('b.qty', 'bt.unit_cost_paise')}) value, min(bt.expiry_date) first_exp from stock_balance b join location l on l.id=b.location_id join batch bt on bt.id=b.batch_id join sku s on s.id=b.sku_id "
                               f"where b.sku_id=:i and b.qty>0{lf} group by l.id order by l.type, qty desc limit 60", i=sid)
-        s["batches"] = many(f"select bt.id, bt.batch_no, bt.received_on, bt.expiry_date, bt.unit_cost_paise, cast(julianday(bt.expiry_date)-julianday(:d) as integer) days_left, sum(b.qty) qty, count(*) locs from batch bt join stock_balance b on b.batch_id=bt.id where bt.sku_id=:i and b.qty>0{lf} group by bt.id order by bt.expiry_date", i=sid, d=TODAY)
+        s["batches"] = many(f"select bt.id, bt.batch_no, bt.received_on, bt.expiry_date, bt.unit_cost_paise, {days_between(engine, "bt.expiry_date", ":d")} days_left, sum(b.qty) qty, count(*) locs from batch bt join stock_balance b on b.batch_id=bt.id where bt.sku_id=:i and b.qty>0{lf} group by bt.id order by bt.expiry_date", i=sid, d=TODAY)
         return s
 
     def ledger_q(w, p, page, size):
@@ -247,7 +248,7 @@ def register(app, engine, one, many, me, need, audit, NOW):
         elif a is not None: w.append(f"b.location_id in {inlist(a)}")
         if cat: w.append("c.code=:cat"); p["cat"] = cat
         base = ("from stock_balance b join batch bt on bt.id=b.batch_id join sku s on s.id=b.sku_id join product pr on pr.id=s.product_id join category c on c.id=pr.category_id join location l on l.id=b.location_id where " + " and ".join(w))
-        dl = "cast(julianday(bt.expiry_date)-julianday(:d) as integer)"
+        dl = days_between(engine, "bt.expiry_date", ":d")
         rows = many(f"select bt.id batch_id, bt.batch_no, s.id sku_id, s.name, c.name cat_name, s.base_uom, bt.expiry_date, {dl} days_left, sum(b.qty) qty, count(*) locs, sum(case when l.format='Mall Kiosk' then 1 else 0 end) kiosks, sum({val('b.qty', 'bt.unit_cost_paise')}) value {base} group by bt.id order by bt.expiry_date, value desc limit 300", **p)
         for r in rows: r["action"] = next(t for lim_, t in ACTIONS if r["days_left"] <= lim_) if r["days_left"] <= 60 else ACTIONS[-1][1]
         bk = many(f"select sum(case when {dl}<0 then {val('b.qty', 'bt.unit_cost_paise')} else 0 end) expired, sum(case when {dl} between 0 and 15 then {val('b.qty', 'bt.unit_cost_paise')} else 0 end) d15, sum(case when {dl} between 16 and 30 then {val('b.qty', 'bt.unit_cost_paise')} else 0 end) d30, "
