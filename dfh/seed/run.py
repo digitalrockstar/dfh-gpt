@@ -1,11 +1,29 @@
 """python -m dfh.seed.run [--months 6] [--seed 42] [--db sqlite:///data/dfh.db] [--data data]"""
 import argparse, os, random, time
-from sqlalchemy import insert
+
+from sqlalchemy import insert, select
+
 from ..schema import metadata
 from ..db import get_engine
 from .masters import build_masters
 from . import history, inventory, wastage, procurement, pos, finance, crm
 from ..demand import model as demand
+
+
+def assert_seed_database_empty(engine):
+    """Refuse to layer demo fixtures over an existing database.
+
+    SQLite demo runs intentionally recreate their local file before this check.
+    For PostgreSQL and other server databases, this guard prevents duplicate seed
+    rows and accidental contamination of a database containing real records.
+    """
+    with engine.connect() as connection:
+        for table in metadata.sorted_tables:
+            if connection.execute(select(table).limit(1)).first() is not None:
+                raise RuntimeError(
+                    f"Refusing to seed non-empty database: table '{table.name}' "
+                    "already contains data. Use a dedicated empty demo database."
+                )
 
 
 def main():
@@ -21,6 +39,7 @@ def main():
             os.remove(p)
     eng = get_engine(a.db); t0 = time.time()
     metadata.create_all(eng)
+    assert_seed_database_empty(eng)
     T, info = build_masters(random.Random(a.seed), a.seed)
     with eng.begin() as c:
         for t in metadata.sorted_tables:
