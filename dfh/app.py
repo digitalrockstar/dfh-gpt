@@ -61,7 +61,7 @@ def create_app(db_url=None, data_dir=None, serve_frontend=True):
 
     def me(authorization: str = Header(default="")):
         uid = auth.read_token(authorization.replace("Bearer ", ""))
-        u = one("select u.id, u.username, u.name, r.code role, u.scope_type, u.scope_id from app_user u join role r on r.id=u.role_id where u.id=:i and u.active=1", i=uid) if uid else None
+        u = one("select u.id, u.username, u.name, r.code role, u.scope_type, u.scope_id from app_user u join role r on r.id=u.role_id where u.id=:i and u.active=true", i=uid) if uid else None
         if not u: raise HTTPException(401, "Not signed in")
         return u
 
@@ -85,7 +85,7 @@ def create_app(db_url=None, data_dir=None, serve_frontend=True):
 
     @app.post("/api/login")
     def login(b: LoginIn):
-        u = one("select u.id, u.name, u.password_hash, r.code role from app_user u join role r on r.id=u.role_id where u.username=:n and u.active=1", n=b.username.strip().lower())
+        u = one("select u.id, u.name, u.password_hash, r.code role from app_user u join role r on r.id=u.role_id where u.username=:n and u.active=true", n=b.username.strip().lower())
         if not u or not auth.verify_pw(b.password, u["password_hash"]): raise HTTPException(401, "Wrong username or password")
         if auth.needs_rehash(u["password_hash"]):
             with engine.begin() as c:
