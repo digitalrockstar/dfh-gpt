@@ -126,11 +126,11 @@ def attach(app, ctx):
 
     @app.get("/api/crm/summary")
     def summary(u=Depends(ops)):
-        st = store_of(u); cw = " and first_store_id=:st" if st is not None else ""; ow = " and fulfil_location_id=:st" if st is not None else ""
+        st = store_of(u); cw = (" and (c.first_store_id=:st or c.id in (select customer_id from sale where store_id=:st and customer_id is not null) or c.id in (select customer_id from customer_purchase where store_id=:st))") if st is not None else ""; ow = " and fulfil_location_id=:st" if st is not None else ""
         d30, d90 = str(TODAY - timedelta(days=30)), str(TODAY - timedelta(days=90))
-        k = one("select count(*) n, coalesce(sum(consent_wa),0) cons, coalesce(sum(case when last_order_on>=:d90 then 1 else 0 end),0) active90, coalesce(sum(case when created_at>=:d30 then 1 else 0 end),0) new30, "
-                "coalesce(sum(case when orders_n>=2 then 1 else 0 end),0) rep, coalesce(sum(loyalty_points),0) pts, coalesce(sum(spend_paise),0) spend from customer where 1=1" + cw, d30=d30, d90=d90, st=st)
-        segs = many("select segment, count(*) n, coalesce(sum(spend_paise),0) spend, avg(orders_n) avg_orders, coalesce(sum(consent_wa),0) cons from customer where 1=1" + cw + " group by segment", st=st)
+        k = one("select count(*) n, coalesce(sum(c.consent_wa),0) cons, coalesce(sum(case when c.last_order_on>=:d90 then 1 else 0 end),0) active90, coalesce(sum(case when c.created_at>=:d30 then 1 else 0 end),0) new30, "
+                "coalesce(sum(case when c.orders_n>=2 then 1 else 0 end),0) rep, coalesce(sum(c.loyalty_points),0) pts, coalesce(sum(c.spend_paise),0) spend from customer c where 1=1" + cw, d30=d30, d90=d90, st=st)
+        segs = many("select c.segment, count(*) n, coalesce(sum(c.spend_paise),0) spend, avg(c.orders_n) avg_orders, coalesce(sum(c.consent_wa),0) cons from customer c where 1=1" + cw + " group by c.segment", st=st)
         order = {s: i for i, s in enumerate(SEGMENTS)}; segs.sort(key=lambda r: order.get(r["segment"], 9))
         w = many("select status, count(*) n, coalesce(sum(total_paise),0) v, min(created_at) oldest from wa_order where created_at>=:d" + ow + " group by status", d=str(NOW - timedelta(days=30)), st=st)
         wm = {r["status"]: r for r in w}
