@@ -15,7 +15,11 @@ Full product plan: `docs/DFH_Product_Plan_v1.pdf` (25 pages; source `docs/build_
 8. Module 1 Control Tower. DONE (browser smoke steps pending).
 9. Module 6 Demand and replenishment. DONE (built early on a modelled stock position; Module 4 and Module 3 replace on hand and on order).
 10. Module 8 Customers and WhatsApp. DONE (sends and payments simulated).
-11. Module 9 HR basic.
+11. Module 9 HR basic. DONE.
+12. Module 10 Platform operations (access administration, approval rules and decisions, audit viewer, device and import health, entities and FX). DONE.
+
+## Next integration hardening
+- Link synced POS bills to CRM customer purchase history and make bill-level sales available to analytics, without double-counting the aggregate Parquet history.
 
 ## Definition of done per module
 Tables seeded, API with tests, screens in all themes, edge cases listed in the PDF covered or listed as open, entry in UPDATES.md.
