@@ -10,7 +10,7 @@ from . import auth
 from .clock import current_time
 from .analytics import Analytics
 from .db import get_engine
-from . import wastage_api, demand_api, procurement_api, pos_api, finance_api, ct_api, crm_api, people_api
+from . import wastage_api, demand_api, procurement_api, pos_api, finance_api, ct_api, crm_api, people_api, platform_api
 
 STATUSES = ["draft", "active", "restricted", "delisted"]
 MOVES = {"draft": {"active", "delisted"}, "active": {"restricted", "delisted"}, "restricted": {"active", "delisted"}, "delisted": {"active"}}
@@ -206,6 +206,7 @@ def create_app(db_url=None, data_dir=None, serve_frontend=True):
     fa = finance_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, **{"NOW": now}))
     ca = crm_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, **{"NOW": now}))
     people_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, **{"NOW": now}))
+    platform_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, **{"NOW": now}))
     pa = procurement_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, **{"NOW": now}))
     ct = need(CT_ROLES)
 
