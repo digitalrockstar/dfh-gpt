@@ -16,3 +16,11 @@ smoke-pos:
 
 smoke-crm:
 	python scripts/smoke_crm.py
+
+# Apply versioned schema migrations (set DATABASE_URL for the target database).
+migrate:
+	alembic upgrade head
+
+# Generate a migration after updating dfh/schema.py; pass message="...".
+revision:
+	alembic revision --autogenerate -m "$(message)"
