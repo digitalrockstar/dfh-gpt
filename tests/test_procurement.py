@@ -169,7 +169,7 @@ def test_order_to_cash_flow(client, eng):
     noexp = [dict(sku_id=l["sku_id"], qty_received=l["qty"]) for l in ls]; assert post(client, f"/pos/{pid}/grn", dict(lines=noexp)).status_code == 422
     stale = [dict(sku_id=l["sku_id"], qty_received=l["qty"], expiry_date="2026-01-01") for l in ls]; assert post(client, f"/pos/{pid}/grn", dict(lines=stale)).status_code == 422
     norsn = [dict(sku_id=ls[0]["sku_id"], qty_received=ls[0]["qty"], qty_rejected=ls[0]["qty"] // 10, expiry_date="2027-06-30")]; assert post(client, f"/pos/{pid}/grn", dict(lines=norsn)).status_code == 422
-    sp0 = q(eng, "select on_hand from stock_position where location_id=:l and sku_id=:s", l=d["po"]["dest_location_id"], s=ls[0]["sku_id"])
+    sp0 = q(eng, "select coalesce(sum(qty),0) from stock_balance where location_id=:l and sku_id=:s", l=d["po"]["dest_location_id"], s=ls[0]["sku_id"])
     good = [dict(sku_id=l["sku_id"], qty_received=l["qty"], expiry_date="2027-06-30") for l in ls]; good[0]["qty_rejected"] = ls[0]["qty"] // 10; good[0]["reject_reason"] = "Moisture above limit"
     r = post(client, f"/pos/{pid}/grn", dict(lines=good), user="warehouse"); assert r.status_code in (200, 403)
     if r.status_code == 403: r = post(client, f"/pos/{pid}/grn", dict(lines=good), user="procurement")
@@ -177,7 +177,7 @@ def test_order_to_cash_flow(client, eng):
     d = get(client, f"/pos/{pid}").json()
     assert d["shipment"]["status"] == "delivered" and d["grns"][0]["lines"][0]["batch_no"] and len(d["debit_notes"]) == 1
     assert q(eng, "select count(*) from batch where source_doc_id=:g", g=r.json()["grn_no"])[0][0] == len(ls)
-    if sp0: assert q(eng, "select on_hand from stock_position where location_id=:l and sku_id=:s", l=d["po"]["dest_location_id"], s=ls[0]["sku_id"])[0][0] > sp0[0][0]
+    if sp0: assert q(eng, "select coalesce(sum(qty),0) from stock_balance where location_id=:l and sku_id=:s", l=d["po"]["dest_location_id"], s=ls[0]["sku_id"])[0][0] > sp0[0][0]
     assert post(client, f"/pos/{pid}/grn", dict(lines=good)).status_code == 409
     # invoice and match
     rec_val = sum(line_minor(l["qty"], l["price_minor"], l["base_uom"]) for l in ls)
