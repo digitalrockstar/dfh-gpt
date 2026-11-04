@@ -152,3 +152,15 @@ def test_minmax_review(client, eng):
     assert q(eng, "select min_qty, max_qty from store_assortment where store_id=:s and sku_id=:k", s=x["store_id"], k=x["sku_id"])[0] == (x["new_min"], x["new_max"])
     assert client.post("/api/demand/minmax", headers=h, json=dict(store_id=x["store_id"], sku_id=x["sku_id"])).status_code == 409
     assert q(eng, "select count(*) from audit_log where table_name='store_assortment' and action='minmax'")[0][0] >= 1
+
+
+def test_live_demand_supply_uses_inventory_and_procurement_records(client, eng):
+    h = tok(client)
+    rows = client.get("/api/demand/suggestions?status=open&size=100", headers=h).json()["items"]
+    assert rows
+    row = rows[0]
+    stock = q(eng, "select coalesce(sum(qty),0) from stock_balance where location_id=:l and sku_id=:s", l=row["location_id"], s=row["sku_id"])[0][0]
+    orders = q(eng, "select coalesce(sum(pl.qty-coalesce(gr.received,0)),0) from purchase_order p join purchase_order_line pl on pl.po_id=p.id left join (select g.po_id,gl.sku_id,sum(gl.qty_received) received from grn g join grn_line gl on gl.grn_id=g.id where g.status='posted' group by g.po_id,gl.sku_id) gr on gr.po_id=p.id and gr.sku_id=pl.sku_id where p.dest_location_id=:l and pl.sku_id=:s and p.status in ('approved','confirmed','in_transit','partial')", l=row["location_id"], s=row["sku_id"])[0][0]
+    assert row["on_hand"] == stock
+    assert row["on_order"] == max(0, orders)
+    assert row["available"] == row["on_hand"] + row["on_order"]
