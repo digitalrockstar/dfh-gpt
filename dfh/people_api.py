@@ -237,7 +237,7 @@ def attach(app, ctx):
         return dict(id=tid,done_at=done)
 
     @app.get("/api/people/jobs")
-    def jobs(u=Depends(read)):
+    def jobs(u=Depends(hr)):
         return many("select j.id,j.title,j.status,j.posted_on,j.closes_on,j.description,d.name department,l.name location,(select count(*) from applicant a where a.job_id=j.id) applicants from job_posting j join department d on d.id=j.department_id left join location l on l.id=j.location_id order by case when j.status='open' then 0 else 1 end,j.posted_on desc")
 
     @app.post("/api/people/jobs")
@@ -251,7 +251,7 @@ def attach(app, ctx):
         return dict(id=jid,status="open")
 
     @app.get("/api/people/applicants")
-    def applicants(job_id: int = 0, stage: str = "", u=Depends(read)):
+    def applicants(job_id: int = 0, stage: str = "", u=Depends(hr)):
         w=" where 1=1";p={}
         if job_id:w+=" and a.job_id=:j";p["j"]=job_id
         if stage:w+=" and a.stage=:s";p["s"]=stage
