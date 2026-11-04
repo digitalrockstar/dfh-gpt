@@ -1,7 +1,7 @@
 import { html, raw, out, inr, rs, pct, num, esc } from "./ui.js";
 import { api, acts, mount, toast, S } from "./core.js";
 
-const ALL_TABS = [["overview", "Overview"], ["stock", "Stock"], ["expiry", "Expiry"], ["transfers", "Transfers"], ["indents", "Indents"], ["repack", "Repack"], ["counts", "Cycle counts"], ["kits", "Gift boxes"]];
+const ALL_TABS = [["overview", "Overview"], ["stock", "Stock"], ["reconcile", "Reconciliation"], ["expiry", "Expiry"], ["transfers", "Transfers"], ["indents", "Indents"], ["repack", "Repack"], ["counts", "Cycle counts"], ["kits", "Gift boxes"]];
 const STORE_TABS = ["stock", "transfers", "indents"];
 const st = { tab: "overview", loc: null, locName: "", q: "", flag: "", sort: "value", page: 1, tstatus: "", istatus: "", days: 60, rwh: null };
 let root, whs = [], timer, draft = { lines: [] };
@@ -34,7 +34,7 @@ export async function render(el) {
 }
 acts["inv-tab"] = a => { st.tab = a.dataset.v; st.page = 1; document.querySelectorAll("#invtabs button").forEach(b => b.classList.toggle("on", b.dataset.v === st.tab)); draw(); };
 const body = () => root.querySelector("#invbody");
-const draw = guard(async () => { mount(body(), html`<div class="sk" style="height:140px"></div>`); await ({ overview, stock, expiry, transfers, indents, repack, counts, kits })[st.tab](); });
+const draw = guard(async () => { mount(body(), html`<div class="sk" style="height:140px"></div>`); await ({ overview, stock, reconcile, expiry, transfers, indents, repack, counts, kits })[st.tab](); });
 
 // ---------------- overview
 async function overview() {
@@ -79,6 +79,23 @@ acts["inv-sku"] = guard(async a => {
     <h2 style="font-size:15px;margin:18px 0 6px">Latest ledger entries${st.loc ? " at the selected location" : ""}</h2>${ledTable(led.items)}`);
 });
 const ledTable = items => html`<div class="tblwrap" style="max-height:300px"><table class="tbl"><thead><tr><th>When</th><th>Movement</th><th class="r">Qty</th><th>Batch</th><th>Document</th></tr></thead><tbody>${items.map(l => html`<tr><td>${day(l.ts)}</td><td>${l.movement_type.replace("_", " ")}</td><td class="r">${l.qty > 0 ? "+" : ""}${qty(l.qty, l.base_uom)}</td><td>${l.batch_no || ""}</td><td class="small muted">${l.doc_id}</td></tr>`)}${items.length ? "" : empty("No entries here.", 5)}</tbody></table></div>`;
+
+
+// ---------------- reconciliation
+async function reconcile() {
+  const r = await api("/inv/reconciliation?" + q2({ location_id: st.loc }));
+  const labels = { quantity_mismatch: "Ledger / balance mismatch", negative_balance: "Negative balance", missing_batch: "Missing batch", batch_sku_mismatch: "Batch belongs to another SKU" };
+  mount(body(), html`<div class="kpis">
+    <div class="kpi glass"><div class="l">Checked positions</div><div class="v">${num(r.checked)}</div><div class="s">SKU × location × batch combinations</div></div>
+    <div class="kpi glass"><div class="l">Quantity mismatches</div><div class="v">${num(r.mismatch_count)}</div><div class="s">Balance less ledger quantity</div></div>
+    <div class="kpi glass"><div class="l">Absolute variance</div><div class="v">${num(r.absolute_variance)}</div><div class="s">In SKU base units, not value</div></div>
+    <div class="kpi glass"><div class="l">Integrity exceptions</div><div class="v">${num(r.issue_count)}</div><div class="s">Includes negative balances and invalid batch links</div></div>
+  </div>
+  <div class="card glass" style="margin-bottom:12px;padding:14px"><b>Read-only check</b><p class="small muted" style="margin-top:4px">The ledger is the movement history; stock balance is its live projection. This screen compares them and never posts corrective entries.</p></div>
+  <div class="solid"><div class="tblwrap"><table class="tbl"><thead><tr><th>Exception</th><th>Location</th><th>SKU / batch</th><th class="r">Ledger</th><th class="r">Balance</th><th class="r">Variance</th></tr></thead><tbody>
+  ${r.items.map(i => html`<tr><td>${labels[i.kind] || i.kind}</td><td>${i.location_code}</td><td><b>${i.sku_name}</b><div class="small muted">${i.sku_code} · ${i.batch_no || "No batch"}</div></td><td class="r">${qty(i.ledger_qty, i.base_uom)}</td><td class="r">${qty(i.balance_qty, i.base_uom)}</td><td class="r">${i.variance_qty ? raw(`<b style="color:var(--bad)">${esc(qty(i.variance_qty, i.base_uom))}</b>`) : "—"}</td></tr>`)}${r.items.length ? "" : empty("No reconciliation exceptions found.", 6)}</tbody></table></div></div>
+  <p class="small muted" style="margin-top:8px">Showing up to ${r.limit} exceptions. Counts and variance totals cover the full permitted scope.</p>`);
+}
 
 // ---------------- expiry
 async function expiry() {
