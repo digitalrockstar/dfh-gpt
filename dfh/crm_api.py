@@ -90,10 +90,14 @@ def attach(app, ctx):
 
     def mask(p, u): return p if u["role"] in FULL_PHONE else (p[:4] + "••••" + p[-4:] if p and len(p) > 8 else p)
 
+    def customer_scope_sql(st):
+        return (" and (first_store_id=:st or id in (select customer_id from sale where store_id=:st and customer_id is not null) "
+                "or id in (select customer_id from customer_purchase where store_id=:st))") if st is not None else ""
+
     def cust_or_404(cid, u):
-        r = one("select * from customer where id=:i", i=cid)
         st = store_of(u)
-        if not r or (st is not None and r["first_store_id"] != st): raise HTTPException(404, "Customer not found")
+        r = one("select * from customer where id=:i" + customer_scope_sql(st), i=cid, st=st)
+        if not r: raise HTTPException(404, "Customer not found")
         return r
 
     def pager(page, size): return max(1, page), max(5, min(size, 100))
@@ -110,7 +114,7 @@ def attach(app, ctx):
 
     # ---------------- summary ----------------
     def unanswered(u, older_h=UNANSWERED_H):
-        st = store_of(u); cw = " and c.first_store_id=:st" if st is not None else ""
+        st = store_of(u); cw = " and (c.first_store_id=:st or c.id in (select customer_id from sale where store_id=:st and customer_id is not null) or c.id in (select customer_id from customer_purchase where store_id=:st))" if st is not None else ""
         rows = many("select m.customer_id, m.ts, m.body from wa_message m join (select customer_id, max(ts) mt from wa_message group by customer_id) x on x.customer_id=m.customer_id and x.mt=m.ts "
                     "join customer c on c.id=m.customer_id where m.direction='in'" + cw, st=st)
         out = []
@@ -154,7 +158,7 @@ def attach(app, ctx):
     @app.get("/api/crm/customers")
     def customers(q: str = "", segment: str = "", city: str = "", consent: str = "", sort: str = "spend", page: int = 1, size: int = 25, u=Depends(ops)):
         page, size = pager(page, size); st = store_of(u); w, p = " where 1=1", dict(st=st, lim=size, off=(page - 1) * size)
-        if st is not None: w += " and first_store_id=:st"
+        if st is not None: w += customer_scope_sql(st)
         if q.strip():
             w += " and (lower(coalesce(name,'')) like :q or phone like :q or code like :q)"; p["q"] = f"%{q.strip().lower()}%"
         if segment in SEGMENTS: w += " and segment=:sg"; p["sg"] = segment
@@ -171,9 +175,22 @@ def attach(app, ctx):
         c = cust_or_404(cid, u); c["phone"] = mask(c["phone"], u)
         last = c["last_order_on"]; rec = (TODAY - (last if hasattr(last, "year") else datetime.fromisoformat(str(last)).date())).days if last else None
         c["recency_days"] = rec
-        pur = many("select p.business_date, p.net_paise, p.items, p.top_category, l.name store from customer_purchase p join location l on l.id=p.store_id where p.customer_id=:i order by p.business_date desc limit 15", i=cid)
-        mon = many("select substr(business_date,1,7) m, count(*) n, sum(net_paise) v from customer_purchase where customer_id=:i group by 1 order by 1", i=cid)
-        cats = many("select top_category c, count(*) n, sum(net_paise) v from customer_purchase where customer_id=:i group by 1 order by v desc limit 3", i=cid)
+        pur = many("select business_date,net_paise,items,top_category,store,invoice_no,source from ("
+                    "select p.business_date,p.net_paise,p.items,p.top_category,l.name store,null invoice_no,'history' source "
+                    "from customer_purchase p join location l on l.id=p.store_id where p.customer_id=:i "
+                    "union all "
+                    "select s.business_date,s.net_paise,(select count(*) from sale_line sl where sl.sale_id=s.id) items,"
+                    "(select ca.name from sale_line sl join sku sk on sk.id=sl.sku_id join product pr on pr.id=sk.product_id join category ca on ca.id=pr.category_id where sl.sale_id=s.id group by ca.name order by sum(sl.net_paise) desc limit 1) top_category,"
+                    "l.name store,s.invoice_no,'pos' source from sale s join location l on l.id=s.store_id where s.customer_id=:i and s.status!='void'"
+                    ") h order by business_date desc limit 15", i=cid)
+        mon = many("select substr(cast(business_date as varchar),1,7) m,count(*) n,sum(net_paise) v from ("
+                   "select business_date,net_paise from customer_purchase where customer_id=:i "
+                   "union all select business_date,net_paise from sale where customer_id=:i and status!='void') h group by 1 order by 1", i=cid)
+        cats = many("select c,count(*) n,sum(v) v from ("
+                    "select top_category c,net_paise v from customer_purchase where customer_id=:i and top_category is not null "
+                    "union all select ca.name c,sum(sl.net_paise) v from sale s join sale_line sl on sl.sale_id=s.id join sku sk on sk.id=sl.sku_id "
+                    "join product pr on pr.id=sk.product_id join category ca on ca.id=pr.category_id where s.customer_id=:i and s.status!='void' group by s.id,ca.name"
+                    ") x group by c order by v desc limit 3", i=cid)
         loy = many("select ts, points, kind, note from loyalty_txn where customer_id=:i order by ts desc limit 12", i=cid)
         wo = many("select id, order_no, status, total_paise, created_at from wa_order where customer_id=:i order by created_at desc limit 8", i=cid)
         msgs = many("select ts, direction, kind, body, status from wa_message where customer_id=:i order by ts desc limit 8", i=cid)
