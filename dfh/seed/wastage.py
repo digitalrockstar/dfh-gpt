@@ -25,8 +25,11 @@ def run(engine, seed=42, outdir="data"):
         locs = [dict(r._mapping) for r in c.execute(text("select id, type, tier, serving_wh_id from location where type in ('store','warehouse')"))]
         vend = {r[0]: r[1] for r in c.execute(text("select sku_id, min(vendor_id) from vendor_sku_cost group by 1"))}
         users = {r[0]: r[1] for r in c.execute(text("select username, id from app_user"))}
-        f1 = __import__("json").loads(c.execute(text("select params from demo_finding where code='F1'")).scalar())["warehouse_id"]
-        f6 = __import__("json").loads(c.execute(text("select params from demo_finding where code='F6'")).scalar())
+        import json
+        f1_raw = c.execute(text("select params from demo_finding where code='F1'")).scalar()
+        f6_raw = c.execute(text("select params from demo_finding where code='F6'")).scalar()
+        f1 = (json.loads(f1_raw) if isinstance(f1_raw, (str, bytes, bytearray)) else f1_raw)["warehouse_id"]
+        f6 = json.loads(f6_raw) if isinstance(f6_raw, (str, bytes, bytearray)) else f6_raw
         reasons = {r[0] for r in c.execute(text("select code from wastage_reason"))}
     pine, kiosks = list(f6["sku_ids"]), list(f6["store_ids"])
     active = [s for s in skus if s["status"] == "active" and s["procurement_type"] != "kit"]
