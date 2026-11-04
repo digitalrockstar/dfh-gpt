@@ -5,6 +5,7 @@ from typing import Optional
 from fastapi import Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
+from .sql_dialect import days_between, date_plus_days, date_plus_literal_days
 from . import stockpost
 
 VIEW = {"ceo", "finance", "admin", "procurement", "warehouse", "store_manager"}
@@ -83,7 +84,7 @@ def attach(app, ctx):
     def expiry_value(u, window, region="", city="", tier=""):
         w, p = where(u, "l", region, city, tier)
         r = one("select coalesce(sum(" + COST.format(q="b.qty") + "),0) v, count(distinct b.sku_id) skus, count(*) lines from stock_balance b join batch t on t.id=b.batch_id join sku s on s.id=b.sku_id join location l on l.id=b.location_id "
-                "where b.qty>0 and t.expiry_date <= date(:now, '+' || :win || ' day')" + w, now=str(NOW.date()), win=window, **p)
+                "where b.qty>0 and t.expiry_date <= {date_plus_days(engine, ":now", "win")}" + w, now=str(NOW.date()), win=window, **p)
         return dict(value=int(r["v"]), skus=r["skus"], lines=r["lines"], window=window)
 
     @app.get("/api/wastage/reasons")
@@ -144,10 +145,10 @@ def attach(app, ctx):
         window = window if window in (15, 30, 60) else 30; w, p = where(u, "l", region, city, tier)
         if kind in ("store", "warehouse"): w += " and l.type=:kd"; p["kd"] = kind
         base = ("from stock_balance b join batch t on t.id=b.batch_id join sku s on s.id=b.sku_id join location l on l.id=b.location_id left join markdown_suggestion m on m.location_id=b.location_id and m.batch_id=b.batch_id "
-                "where b.qty>0 and t.expiry_date <= date(:now, '+60 day')" + w)
+                "where b.qty>0 and t.expiry_date <= {date_plus_literal_days(engine, ":now", 60)}" + w)
         val = COST.format(q="b.qty")
         rows = many(f"select b.location_id, b.batch_id, b.qty, l.code lcode, l.name lname, l.city, l.type ltype, s.id sku_id, s.name sku, s.base_uom, t.batch_no, t.expiry_date, "
-                    f"cast(julianday(t.expiry_date) - julianday(:now) as integer) days_left, cast({val} as integer) value, m.id mid, m.suggested_pct, m.status mstatus {base}", now=str(NOW.date()), **p)
+                    f"{days_between(engine, "t.expiry_date", ":now")} days_left, cast({val} as integer) value, m.id mid, m.suggested_pct, m.status mstatus {base}", now=str(NOW.date()), **p)
         buckets = dict(expired=dict(n=0, value=0), d15=dict(n=0, value=0), d30=dict(n=0, value=0), d60=dict(n=0, value=0))
         for r in rows:
             k = "expired" if r["days_left"] < 0 else "d15" if r["days_left"] <= 15 else "d30" if r["days_left"] <= 30 else "d60"
@@ -249,7 +250,7 @@ def attach(app, ctx):
                 if med and r["c"] >= 2 * med:
                     lead = "theft and weighing variance" if r["th"] + r["wt"] > r["c"] * 0.3 else "damage and spoilage"
                     out.append(dict(type="shrink", severity="high", title=f"{r['name']} shrink is {r['c'] / med:.1f}x the typical warehouse", detail=f"{r['city']}. Lost stock at cost over 30 days is {money(r['c'])} against a median of {money(med)}. {lead.capitalize()} lead the mix.", ref=r["id"]))
-        e = one("select coalesce(sum(" + COST.format(q="b.qty") + "),0) v, count(distinct b.location_id) n from stock_balance b join batch t on t.id=b.batch_id join sku s on s.id=b.sku_id join location l on l.id=b.location_id where l.type='store' and b.qty>0 and t.expiry_date <= date(:now, '+30 day')", now=str(NOW.date()))
+        e = one("select coalesce(sum(" + COST.format(q="b.qty") + "),0) v, count(distinct b.location_id) n from stock_balance b join batch t on t.id=b.batch_id join sku s on s.id=b.sku_id join location l on l.id=b.location_id where l.type='store' and b.qty>0 and t.expiry_date <= {date_plus_literal_days(engine, ":now", 30)}", now=str(NOW.date()))
         top = many("select s.name, sum(" + COST.format(q="b.qty") + ") v, count(distinct b.location_id) n from stock_balance b join batch t on t.id=b.batch_id join sku s on s.id=b.sku_id join location l on l.id=b.location_id where l.type='store' and b.qty>0 and t.expiry_date <= date(:now, '+30 day') group by s.name order by v desc limit 2", now=str(NOW.date()))
         if e["v"] and top:
             out.append(dict(type="expiry", severity="med", title=f"{money(e['v'])} of store stock is expired or expires within 30 days", detail=f"{e['n']} stores hold it. Largest: {', '.join(f'{t['name']} ({money(t['v'])}, {t['n']} stores)' for t in top)}. Markdown suggestions are open in Wastage.", ref="expiry"))
