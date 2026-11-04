@@ -1,3 +1,12 @@
+## 2026-11-04 Demand availability cutover to operational inventory
+- Demand/replenishment now reads on-hand from the Module 4 stock balance projection and approved/confirmed/in-transit/partial PO commitments net of posted GRN quantities. The suggestion endpoint refreshes live on-hand/on-order/available values rather than exposing the forecast-time snapshot.
+- Gift box component coverage is computed from current balances and open PO commitments across warehouses, capped against each warehouse's demand requirement.
+- Procurement no longer mutates stock_position when approving/cancelling a PO or posting a GRN. GRN accepted quantities continue to post through the inventory ledger and stock balance atomically. POS and wastage already post through that same path.
+- The demand model no longer creates or rebuilds stock_position, and planted synthetic stock overrides were removed from replenishment calculations. The stock_position schema remains temporarily for backwards-compatible migration; no active demand/procurement runtime code reads or writes it.
+- Added tests for live supply parity and confirmed the procurement flow asserts GRN receipt against stock_balance. CI pending.
+- Open: demand reorder quantities/urgency still represent the last forecast run; only the displayed availability and gift box component coverage refresh live. A new forecast run is required to regenerate suggestion quantities after material stock or PO changes.
+
+
 # UPDATES (newest first)
 
 ## 2026-11-04 POS transaction analytics integration
