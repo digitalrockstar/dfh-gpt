@@ -17,6 +17,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      DFH_DEMO_NOW: "2026-10-31T09:00:00"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
