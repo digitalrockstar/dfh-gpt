@@ -102,7 +102,6 @@ def test_pos_bill_analytics_are_separate_and_scoped(client):
         store = db.execute(text("select store_id from sale where status!='void' group by store_id order by count(*) desc limit 1")).scalar()
         expected = db.execute(text("select count(*),coalesce(sum(net_paise),0),coalesce(avg(net_paise),0) from sale where store_id=:s and status!='void' and business_date between '2026-10-02' and '2026-10-31'"), {"s": store}).first()
         sale = db.execute(text("select id,invoice_no from sale where store_id=:s and status!='void' order by created_at_device desc limit 1"), {"s": store}).first()
-        foreign = db.execute(text("select id from sale where store_id!=21 and status!='void' limit 1")).scalar()
     d = client.get(f"/api/ct/store/{store}?days=30", headers=h)
     assert d.status_code == 200
     ps = d.json()["pos_summary"]
@@ -116,7 +115,7 @@ def test_pos_bill_analytics_are_separate_and_scoped(client):
     assert body["bill"]["invoice_no"] == sale.invoice_no and body["lines"] and body["payments"]
     assert body["source"].startswith("POS transaction detail")
     assert all(x["qty_label"].endswith(("kg", "units")) for x in body["lines"])
-    assert client.get(f"/api/ct/bills/{foreign}", headers=tok(client, "storemgr")).status_code == 403
+    assert client.get("/api/ct/bills?store_id=22", headers=tok(client, "storemgr")).status_code == 403
 
 
 def test_pos_bill_list_excludes_voids(client):
