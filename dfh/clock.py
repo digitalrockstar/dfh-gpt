@@ -7,6 +7,7 @@ local wall-clock timestamps without timezone metadata.
 """
 import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 
 def current_time() -> datetime:
@@ -16,4 +17,5 @@ def current_time() -> datetime:
         if value.tzinfo is not None:
             raise ValueError("DFH_DEMO_NOW must be a timezone-naive local datetime")
         return value
-    return datetime.now()
+    timezone = ZoneInfo(os.getenv("DFH_TIMEZONE", "Asia/Kolkata"))
+    return datetime.now(timezone).replace(tzinfo=None)
