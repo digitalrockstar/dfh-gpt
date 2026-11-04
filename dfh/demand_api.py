@@ -34,7 +34,7 @@ def attach(app, ctx):
     def run():
         r = one("select id, run_at, horizon_weeks, wape, notes from forecast_run order by id desc limit 1")
         if not r: raise HTTPException(503, "Forecast has not been built. Run python -m dfh.demand.run")
-        r["notes"] = json.loads(r["notes"]); return r
+        r["notes"] = json.loads(r["notes"]) if isinstance(r["notes"], (str, bytes, bytearray)) else r["notes"]; return r
 
     def stores(u):
         if u["scope_type"] == "store": return [u["scope_id"]]
