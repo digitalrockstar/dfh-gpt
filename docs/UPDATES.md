@@ -1,5 +1,13 @@
 # UPDATES (newest first)
 
+## 2026-11-04 POS transaction analytics integration
+- Control Tower store drill now reports bill count, average bill value, SKU lines per bill and approved refunds for the selected period. These metrics are sourced only from non-void POS transactions and approved return records.
+- Added a scoped POS bill register API with date/search filters and bill detail API exposing line items in their native SKU units, payment tenders, return requests, approved refunds and retained value.
+- Added bill-level drill-down from the store view. Transaction metrics are explicitly labelled as POS sample data and are not added to the aggregate Parquet sales KPIs; the existing six-month chain trends, comparisons, category mix and store league remain unchanged.
+- Tests cover POS totals against the operational sale table, average bill value, bill detail, quantity units, store scope and void exclusion. CI validation pending.
+- Open: POS bill-level metrics cover only bills actually synced into the transactional database; the six-month Parquet history remains synthetic daily store x SKU aggregates. Returns are shown separately and do not rewrite historical Parquet totals.
+
+
 ## 2026-11-04 Module 10 Platform operations
 - Seed (dfh/seed/masters.py): five amount-based approval rules, three pending approval requests across procurement, stock adjustment and campaign work, and three sample import jobs (two completed, one failed).
 - API (dfh/platform_api.py): CEO/admin user role, activation and location-scope administration; approval rule creation/removal, request creation and role-based decisions; audit search; import-job history; device sync health; legal-entity view and monthly FX-rate upsert. Changes are audited. Self-lockout, overlapping approval bands, self-approval and deletion of rules with pending requests are blocked.
