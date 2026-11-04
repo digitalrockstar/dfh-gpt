@@ -23,6 +23,14 @@ alembic stamp 0001_baseline
 
 This records the migration version without changing application tables.
 
+## Demo seeding
+
+The seed runner is for disposable demo databases, not production initialization.
+
+- The default local SQLite demo database is recreated by the seed runner.
+- For PostgreSQL and other server databases, the runner refuses to seed if any application table already contains rows.
+- Use a dedicated, empty database for demo fixtures. Do not point the seed runner at a live or shared database.
+
 ## Future schema changes
 
 1. Update `dfh/schema.py`.
