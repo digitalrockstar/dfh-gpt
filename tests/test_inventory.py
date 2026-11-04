@@ -157,6 +157,42 @@ def test_counts_and_approval_limits(env):
     assert c.post("/api/inv/counts", headers=wh_h, json=dict(location_id=1, abc_class="Z")).status_code == 422 and c.post("/api/inv/counts", headers=wh_h, json=dict(location_id=2, abc_class="C")).status_code == 403
 
 
+
+
+def test_inventory_reconciliation_matches_ledger_projection_and_scopes(env):
+    c, con = env
+    ceo, wh, sm = H(c, "ceo"), H(c, "warehouse"), H(c, "storemgr")
+    r = c.get("/api/inv/reconciliation", headers=ceo)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["checked"] > 0
+    assert data["mismatch_count"] == 0
+    assert data["absolute_variance"] == 0
+    assert data["negative_balance_count"] == 0
+    assert data["items"] == []
+    scoped = c.get("/api/inv/reconciliation?location_id=1", headers=wh)
+    assert scoped.status_code == 200 and scoped.json()["checked"] > 0
+    assert c.get("/api/inv/reconciliation?location_id=2", headers=wh).status_code == 403
+    store_id = q(con, "select scope_id from app_user where username='storemgr'")[0][0]
+    assert c.get(f"/api/inv/reconciliation?location_id={store_id}", headers=sm).status_code == 403
+    assert c.get("/api/inv/reconciliation", headers=H(c, "cashier")).status_code == 403
+
+
+def test_inventory_reconciliation_detects_projection_drift(env):
+    c, con = env
+    h = H(c, "ceo")
+    row = q(con, "select location_id, sku_id, batch_id, qty from stock_balance where qty>0 limit 1")[0]
+    con.execute("update stock_balance set qty=qty+7 where location_id=? and sku_id=? and batch_id=?", row[:3])
+    con.commit()
+    r = c.get(f"/api/inv/reconciliation?location_id={row[0]}", headers=h)
+    assert r.status_code == 200
+    d = r.json()
+    assert d["mismatch_count"] == 1
+    assert d["absolute_variance"] == 7
+    assert d["items"][0]["kind"] == "quantity_mismatch"
+    # Reconciliation is observational: it does not silently repair or mutate stock.
+    assert q(con, "select qty from stock_balance where location_id=? and sku_id=? and batch_id=?", row[:3])[0][0] == row[3] + 7
+
 def test_scope_and_roles(env):
     c, con = env; wh, sm, ca = H(c, "warehouse"), H(c, "storemgr"), H(c, "cashier"); ceo = H(c, "ceo")
     assert c.get("/api/inv/overview", headers=ca).status_code == 403 and c.get("/api/inv/overview", headers=sm).status_code == 403
