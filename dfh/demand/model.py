@@ -22,7 +22,7 @@ SHRINK = 14
 FIT_FROM = date(2026, 7, 1)        # history starts 1 May and sales ramp over the first two months, so the fit uses July onward
 CATS = ["NDF", "DAT", "EXC", "BER", "SED", "GFT", "CHO", "SPC"]
 Z_A, Z_B = 1.65, 1.28
-COVER_X, COVER_S = 1.9, 14.0     # modelled stock snapshot: baseline days of cover = (lead time + 14) x COVER_X plus noise of COVER_S days
+COVER_X, COVER_S = 1.9, 14.0     # deterministic seed-only inventory distribution for the legacy demo baseline
 METHOD = "festival_level_v1"
 D = lambda x: x if isinstance(x, date) else date.fromisoformat(str(x)[:10])
 
@@ -244,7 +244,7 @@ def _inv(R, y):
     return np.minimum(t, 999.0)
 
 
-def replenish(C, Fq, Fb, bt, seed):
+def replenish(C, Fq, Fb, bt, seed, engine):
     S, NW = len(C.sk_id), len(C.wh)
     whi = C.st_wh[C.a_st]; ok = whi >= 0
     def dense(F):
@@ -258,9 +258,18 @@ def replenish(C, Fq, Fb, bt, seed):
     best = [cost[int(C.sk_id[s])][0] for s in ps]
     uc = np.array([b[0] for b in best]); vid = np.array([b[1] for b in best]); moq = np.array([float(b[2]) for b in best]); lead = np.array([b[3] for b in best], float)
     chg = [b[4] for b in best]
-    # modelled stock position until Module 4 (ledger) and Module 3 (open POs) exist
+    # Deterministic seed baseline only. Runtime demand APIs never read this table;
+    # operational availability is supplied by Module 4 balances and Module 3 PO/GRN records.
     base_d = Rb[:, :4].mean(1); cover = np.maximum(2.0, (lead + 14) * COVER_X + rng.normal(0, COVER_S, n))
     oh = base_d * cover; has = rng.random(n) < .45; oo = np.where(has, base_d * lead * rng.uniform(.2, .9, n), 0.0); eta = np.where(has, rng.integers(2, np.maximum(3, lead.astype(int) + 1)), 0)
+    with engine.connect() as conn:
+        for i, (loc, sku) in enumerate(zip(C.wh[pw], C.sk_id[ps])):
+            rows = conn.execute(text("select coalesce(sum(qty),0) from stock_balance where location_id=:l and sku_id=:s"), dict(l=int(loc), s=int(sku)))
+            stock_value = float(rows.scalar() or 0)
+            oh[i] = stock_value
+            pending = conn.execute(text("select coalesce(sum(pl.qty-coalesce(gr.received,0)),0) from purchase_order p join purchase_order_line pl on pl.po_id=p.id left join (select g.po_id,gl.sku_id,sum(gl.qty_received) received from grn g join grn_line gl on gl.grn_id=g.id where g.status='posted' group by g.po_id,gl.sku_id) gr on gr.po_id=p.id and gr.sku_id=pl.sku_id where p.dest_location_id=:l and pl.sku_id=:s and p.status in ('approved','confirmed','in_transit','partial')"), dict(l=int(loc), s=int(sku)))
+            oo[i] = float(pending.scalar() or 0)
+            eta[i] = 0 if oo[i] <= 0 else int(max(1, min(lead[i], 7)))
     pune = {int(C.st_wh[C.tx[s]]) for s in C.f3["store_ids"]}
     f3t = {C.sx[C.sk_bulk[C.sx[s]]] if C.sk_type[C.sx[s]] == "repacked" else C.sx[s] for s in C.f3["sku_ids"]}
     kitt = {t for s, t, m, kd in E if kd == "kit" and int(C.sk_id[s]) in set(C.f7["kit_sku_ids"])}
@@ -311,11 +320,11 @@ def run(engine, data_dir="data", seed=42, shrink=SHRINK, log=print):
                  band="80 percent interval from error variance fitted per category on the backtest weeks",
                  assumptions=["Festival shape comes from the festival calendar and is a planning assumption. Category sensitivity is learned from sales.",
                               "No festival is modelled after Diwali because the calendar has none. Christmas and New Year are open items.",
-                              "Stock on hand and on order are a modelled snapshot until Module 4 (ledger) and Module 3 (purchase orders) exist.",
+                              "On-hand comes from the Module 4 stock balance projection; open purchase commitments are derived from approved PO lines net of posted GRN receipts.",
                               "Vendor cost is before freight, duty and clearing. Landed cost comes with Module 3.",
                               "Packs roll up to bulk SKUs at 100 percent yield until repack yield is recorded.",
                               "Safety stock uses z of 1.65 for the top quarter of SKUs by value and 1.28 for the rest."])
-    sugg, pos, req = replenish(C, Fq, Fb, bt, seed)
+    sugg, pos, req = replenish(C, Fq, Fb, bt, seed, engine)
     tabs = [metadata.tables[t] for t in ("reorder_suggestion", "demand_requirement", "stock_position", "forecast", "forecast_run")]
     for t in tabs: t.drop(engine, checkfirst=True)          # rebuilt from the current schema, so the runner also works on older databases
     metadata.create_all(engine, tables=tabs[::-1])
