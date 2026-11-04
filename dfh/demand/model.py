@@ -252,27 +252,30 @@ def replenish(C, Fq, Fb, bt, seed, engine):
     Gq, Gb = dense(Fq), dense(Fb); E = _edges(C)
     Dq, Db, Dk = explode(Gq, E), explode(Gb, E), explode(Gq, E, {"kit"})
     cost = unit_costs(C); buy = [k for k in range(S) if C.sk_type[k] in ("bulk", "finished") and int(C.sk_id[k]) in cost]
-    rng = np.random.default_rng(seed + 6)
     pw, ps = np.nonzero(Dq[:, buy, :].sum(2) > 0); ps = np.array(buy)[ps] if len(ps) else ps
     n = len(pw); R = Dq[pw, ps, :] / 7.0; Rb = Db[pw, ps, :] / 7.0
     best = [cost[int(C.sk_id[s])][0] for s in ps]
     uc = np.array([b[0] for b in best]); vid = np.array([b[1] for b in best]); moq = np.array([float(b[2]) for b in best]); lead = np.array([b[3] for b in best], float)
     chg = [b[4] for b in best]
-    # Deterministic seed baseline only. Runtime demand APIs never read this table;
-    # operational availability is supplied by Module 4 balances and Module 3 PO/GRN records.
-    base_d = Rb[:, :4].mean(1); cover = np.maximum(2.0, (lead + 14) * COVER_X + rng.normal(0, COVER_S, n))
-    oh = base_d * cover; has = rng.random(n) < .45; oo = np.where(has, base_d * lead * rng.uniform(.2, .9, n), 0.0); eta = np.where(has, rng.integers(2, np.maximum(3, lead.astype(int) + 1)), 0)
+    oh, oo, eta = np.zeros(n), np.zeros(n), np.zeros(n)
     with engine.connect() as conn:
-        for i, (loc, sku) in enumerate(zip(C.wh[pw], C.sk_id[ps])):
-            rows = conn.execute(text("select coalesce(sum(qty),0) from stock_balance where location_id=:l and sku_id=:s"), dict(l=int(loc), s=int(sku)))
-            stock_value = float(rows.scalar() or 0)
-            oh[i] = stock_value
-            pending = conn.execute(text("select coalesce(sum(pl.qty-coalesce(gr.received,0)),0) from purchase_order p join purchase_order_line pl on pl.po_id=p.id left join (select g.po_id,gl.sku_id,sum(gl.qty_received) received from grn g join grn_line gl on gl.grn_id=g.id where g.status='posted' group by g.po_id,gl.sku_id) gr on gr.po_id=p.id and gr.sku_id=pl.sku_id where p.dest_location_id=:l and pl.sku_id=:s and p.status in ('approved','confirmed','in_transit','partial')"), dict(l=int(loc), s=int(sku)))
-            oo[i] = float(pending.scalar() or 0)
-            eta[i] = 0 if oo[i] <= 0 else int(max(1, min(lead[i], 7)))
+        stock_rows = conn.execute(text("select location_id, sku_id, sum(qty) from stock_balance group by location_id, sku_id")).fetchall()
+        stock = {(r[0], r[1]): float(r[2] or 0) for r in stock_rows}
+        order_rows = conn.execute(text(
+            "select p.dest_location_id, pl.sku_id, sum(pl.qty-coalesce(gr.received,0)) "
+            "from purchase_order p join purchase_order_line pl on pl.po_id=p.id "
+            "left join (select g.po_id, gl.sku_id, sum(gl.qty_received) received from grn g join grn_line gl on gl.grn_id=g.id "
+            "where g.status='posted' group by g.po_id,gl.sku_id) gr on gr.po_id=p.id and gr.sku_id=pl.sku_id "
+            "where p.status in ('approved','confirmed','in_transit','partial') group by p.dest_location_id,pl.sku_id"
+        )).fetchall()
+        commitments = {(r[0], r[1]): max(0.0, float(r[2] or 0)) for r in order_rows}
+    for i, (loc, sku) in enumerate(zip(C.wh[pw], C.sk_id[ps])):
+        key = (int(loc), int(sku))
+        oh[i] = stock.get(key, 0.0)
+        oo[i] = commitments.get(key, 0.0)
+        eta[i] = 0 if oo[i] <= 0 else min(7, max(1, lead[i]))
     step = np.where(C.sk_loose[ps], 1000.0, 1.0)
     oh = np.floor(oh / step) * step; oo = np.floor(oo / step) * step
-    # policy
     val = Dq[pw, ps, :].sum(1) * uc; a_cut = np.quantile(val, .75); z = np.where(val >= a_cut, Z_A, Z_B)
     rel = np.array([bt["categories"][CATS[C.sk_cat[s]]]["rel_wh"] or .15 for s in ps])
     need_lead, need_cycle = _cum(R, lead), _cum(R, lead + REVIEW)
@@ -284,7 +287,6 @@ def replenish(C, Fq, Fb, bt, seed, engine):
     urg = np.where(cov < lead, "critical", np.where(cov - lead < 7, "soon", "plan"))
     ob = [T_END + timedelta(days=int(max(0, min(365, math.floor(c - l))))) for c, l in zip(cov, lead)]
     tot, base_t, kit_t = Dq[pw, ps, :].sum(1), Db[pw, ps, :].sum(1), Dk[pw, ps, :].sum(1)
-    fmt = lambda q, s: (f"{q / 1000:,.0f} kg" if q >= 1000 else f"{q:,.0f} g") if C.sk_loose[s] else f"{q:,.0f} units"
     sugg = []
     for i in np.nonzero(sug)[0]:
         s = ps[i]; lift = tot[i] / base_t[i] - 1 if base_t[i] > 0 else 0.0
