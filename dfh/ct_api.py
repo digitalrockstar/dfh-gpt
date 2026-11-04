@@ -202,7 +202,7 @@ def attach(app, ctx, exceptions_for, ct_guard, filters):
 
     @app.get("/api/ct/owners")
     def owners(u=Depends(ct_guard)):
-        return many("select u.id, u.name, r.code role from app_user u join role r on r.id=u.role_id where u.active=1 and r.code not in ('cashier') order by u.id")
+        return many("select u.id, u.name, r.code role from app_user u join role r on r.id=u.role_id where u.active=true and r.code not in ('cashier') order by u.id")
 
     @app.patch("/api/ct/inbox/{iid}")
     def inbox_patch(iid: int, b: InboxPatch, u=Depends(ct_guard)):
@@ -216,7 +216,7 @@ def attach(app, ctx, exceptions_for, ct_guard, filters):
             if not boss: raise HTTPException(403, "Only the CEO or admin can assign owners and due dates")
         if b.unassign: ch["owner_id"] = None
         if b.owner_id is not None:
-            if not one("select id from app_user where id=:i and active=1", i=b.owner_id): raise HTTPException(422, "Unknown owner")
+            if not one("select id from app_user where id=:i and active=true", i=b.owner_id): raise HTTPException(422, "Unknown owner")
             ch["owner_id"] = b.owner_id
             if b.status is None and it["status"] == "open": ch["status"] = "assigned"
         if b.due_date is not None:
