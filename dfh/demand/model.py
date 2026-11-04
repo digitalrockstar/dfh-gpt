@@ -317,6 +317,10 @@ def run(engine, data_dir="data", seed=42, shrink=SHRINK, log=print):
                               "Packs roll up to bulk SKUs at 100 percent yield until repack yield is recorded.",
                               "Safety stock uses z of 1.65 for the top quarter of SKUs by value and 1.28 for the rest."])
     sugg, req = replenish(C, Fq, Fb, bt, seed, engine)
+    # Legacy table may exist in databases created before the ledger cutover.
+    # Drop it only after all dependent runtime reads/writes have been removed.
+    if "stock_position" in metadata.tables:
+        metadata.tables["stock_position"].drop(engine, checkfirst=True)
     tabs = [metadata.tables[t] for t in ("reorder_suggestion", "demand_requirement", "forecast", "forecast_run")]
     for t in tabs: t.drop(engine, checkfirst=True)          # rebuilt from the current schema, so the runner also works on older databases
     metadata.create_all(engine, tables=tabs[::-1])
