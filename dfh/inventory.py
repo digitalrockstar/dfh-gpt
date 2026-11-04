@@ -243,6 +243,58 @@ def register(app, engine, one, many, me, need, audit, NOW):
         if not (sku_id or location_id or batch_id): raise err(422, "Give a SKU, a location or a batch")
         return ledger_q(w, p, max(1, page), max(1, min(size, 200)))
 
+    @app.get("/api/inv/reconciliation")
+    def reconciliation(location_id: int = 0, limit: int = 100, u=Depends(inv_read)):
+        """Read-only reconciliation of the authoritative ledger against its operational balance projection."""
+        if location_id: see(u, location_id)
+        a = allowed(u)
+        w, p = [], {}
+        if location_id: w.append("k.location_id=:loc"); p["loc"] = location_id
+        elif a is not None: w.append(f"k.location_id in {inlist(a)}")
+        where = (" where " + " and ".join(w)) if w else ""
+        lim = max(1, min(limit, 500))
+        rows = many(
+            "select k.location_id, l.code location_code, l.name location_name, k.sku_id, s.code sku_code, s.name sku_name, s.base_uom, "
+            "k.batch_id, bt.batch_no, coalesce(x.ledger_qty,0) ledger_qty, coalesce(b.qty,0) balance_qty, "
+            "coalesce(b.qty,0)-coalesce(x.ledger_qty,0) variance_qty "
+            "from (select location_id, sku_id, batch_id from stock_ledger union select location_id, sku_id, batch_id from stock_balance) k "
+            "join location l on l.id=k.location_id join sku s on s.id=k.sku_id left join batch bt on bt.id=k.batch_id "
+            "left join (select location_id, sku_id, batch_id, sum(qty) ledger_qty from stock_ledger group by 1,2,3) x "
+            "on x.location_id=k.location_id and x.sku_id=k.sku_id and x.batch_id=k.batch_id "
+            "left join stock_balance b on b.location_id=k.location_id and b.sku_id=k.sku_id and b.batch_id=k.batch_id"
+            + where + " order by abs(coalesce(b.qty,0)-coalesce(x.ledger_qty,0)) desc, l.code, s.code limit :lim",
+            **p, lim=lim
+        )
+        # Include zero-balance rows and distinguish structural integrity errors from quantity drift.
+        issues = []
+        for r in rows:
+            if r["variance_qty"]:
+                issues.append(dict(kind="quantity_mismatch", **r))
+            if r["batch_id"] is not None and r["batch_no"] is None:
+                issues.append(dict(kind="missing_batch", **r))
+            elif r["batch_id"] is not None:
+                owner = one("select sku_id from batch where id=:b", b=r["batch_id"])
+                if owner and owner["sku_id"] != r["sku_id"]:
+                    issues.append(dict(kind="batch_sku_mismatch", **r))
+        negative = many("select b.location_id, l.code location_code, l.name location_name, b.sku_id, s.code sku_code, s.name sku_name, s.base_uom, b.batch_id, bt.batch_no, 0 ledger_qty, b.qty balance_qty, b.qty variance_qty "
+                        "from stock_balance b join location l on l.id=b.location_id join sku s on s.id=b.sku_id left join batch bt on bt.id=b.batch_id where b.qty<0"
+                        + (" and b.location_id=:loc" if location_id else (f" and b.location_id in {inlist(a)}" if a is not None else "")),
+                        **({"loc": location_id} if location_id else {}))
+        for r in negative: issues.append(dict(kind="negative_balance", **r))
+        totals = one("select count(*) n, sum(case when variance_qty<>0 then 1 else 0 end) mismatches, sum(abs(variance_qty)) absolute_variance "
+                     "from (select coalesce(b.qty,0)-coalesce(x.ledger_qty,0) variance_qty from "
+                     "(select location_id,sku_id,batch_id from stock_ledger union select location_id,sku_id,batch_id from stock_balance) k "
+                     "left join (select location_id,sku_id,batch_id,sum(qty) ledger_qty from stock_ledger group by 1,2,3) x "
+                     "on x.location_id=k.location_id and x.sku_id=k.sku_id and x.batch_id=k.batch_id "
+                     "left join stock_balance b on b.location_id=k.location_id and b.sku_id=k.sku_id and b.batch_id=k.batch_id"
+                     + (" where k.location_id=:loc" if location_id else (f" where k.location_id in {inlist(a)}" if a is not None else "")) + ")",
+                     **({"loc": location_id} if location_id else {}))
+        # Return actionable examples while totals cover the full scoped population.
+        return dict(scope_location_id=location_id or None, checked=totals["n"] or 0, mismatch_count=totals["mismatches"] or 0,
+                    absolute_variance=totals["absolute_variance"] or 0, negative_balance_count=len(negative),
+                    issue_count=(totals["mismatches"] or 0) + len(negative) + sum(1 for x in issues if x["kind"] in ("missing_batch", "batch_sku_mismatch")),
+                    items=issues[:lim], limit=lim, read_only=True)
+
     @app.get("/api/inv/expiry")
     def expiry(days: int = 60, location_id: int = 0, cat: str = "", u=Depends(inv_read)):
         a = allowed(u); lim = str(NOW.date() + timedelta(days=min(days, 365))); w, p = ["b.qty>0", "bt.expiry_date<=:lim"], dict(lim=lim, d=TODAY)
