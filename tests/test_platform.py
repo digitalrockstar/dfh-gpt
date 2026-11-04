@@ -69,10 +69,12 @@ def test_approval_rules_request_and_decision(env):
     })
     assert request.status_code == 200, request.text
     rid = request.json()["id"]
+    assert c.delete(f"/api/platform/approval-rules/{rule.json()['id']}", headers=admin).status_code == 409
     assert c.post(f"/api/platform/approvals/{rid}/decision", headers=requester, json={"decision": "approve"}).status_code == 403
     finance = token(c, "finance")
     assert c.post(f"/api/platform/approvals/{rid}/decision", headers=finance, json={"decision": "approve"}).json()["status"] == "approved"
     assert c.post(f"/api/platform/approvals/{rid}/decision", headers=finance, json={"decision": "reject"}).status_code == 409
+    assert c.delete(f"/api/platform/approval-rules/{rule.json()['id']}", headers=admin).status_code == 200
     rows = c.get("/api/platform/approvals?status=approved", headers=admin).json()["items"]
     assert any(x["id"] == rid for x in rows)
     assert c.get("/api/platform/audit?action=create&table_name=approval_rule", headers=admin).json()["total"] >= 1
