@@ -271,7 +271,7 @@ def replenish(C, Fq, Fb, bt, seed, engine):
             "where p.status in ('approved','confirmed','in_transit','partial') group by p.dest_location_id,pl.sku_id"
         )).fetchall()
         commitments = {(r[0], r[1]): max(0.0, float(r[2] or 0)) for r in order_rows}
-    for i, (loc, sku) in enumerate(zip(C.wh[pw], C.sk_id[ps])):
+    for i, (loc, sku) in enumerate(zip((C.wh[int(w)] for w in pw), C.sk_id[ps])):
         key = (int(loc), int(sku))
         oh[i] = stock.get(key, 0.0)
         oo[i] = commitments.get(key, 0.0)
