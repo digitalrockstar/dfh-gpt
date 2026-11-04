@@ -357,7 +357,7 @@ def attach(app, ctx):
                     "(select count(*) from sale s where s.device_id=d.id and s.received_at>=:since) bills_24h, "
                     "(select coalesce(sum(bills_rejected),0) from sync_log g where g.device_id=d.id and g.finished_at>=:since) rejected_24h, "
                     "(select queue_depth from sync_log g where g.device_id=d.id order by g.finished_at desc limit 1) queue_depth "
-                    "from device d join location l on l.id=d.store_id where d.active=1 and (:all=1 or d.store_id=:s)", since=NOW - timedelta(hours=24), all=0 if sc else 1, s=sc[0] if sc else 0)
+                    "from device d join location l on l.id=d.store_id where d.active=true and (:all=1 or d.store_id=:s)", since=NOW - timedelta(hours=24), all=0 if sc else 1, s=sc[0] if sc else 0)
         out = []
         for r in rows:
             ls = r["last_seen_at"]
