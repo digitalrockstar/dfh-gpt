@@ -1,4 +1,5 @@
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -12,9 +13,11 @@ def test_clock_uses_configured_demo_datetime(monkeypatch):
 
 def test_clock_defaults_to_current_time(monkeypatch):
     monkeypatch.delenv("DFH_DEMO_NOW", raising=False)
-    before = datetime.now()
+    monkeypatch.setenv("DFH_TIMEZONE", "Asia/Kolkata")
+    timezone = ZoneInfo("Asia/Kolkata")
+    before = datetime.now(timezone).replace(tzinfo=None)
     value = current_time()
-    after = datetime.now()
+    after = datetime.now(timezone).replace(tzinfo=None)
     assert before <= value <= after
 
 
