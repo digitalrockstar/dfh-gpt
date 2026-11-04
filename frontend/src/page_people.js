@@ -21,8 +21,10 @@ const tabs = [["overview","Overview"],["employees","Employees"],["attendance","A
 
 export async function render(el) {
   root=el; opts=await api("/people/options");
+  if (!isHR() && st.tab === "hiring") st.tab = "overview";
+  const visibleTabs = tabs.filter(([k]) => k !== "hiring" || isHR());
   mount(el,html`<div class="head"><div><div class="eyebrow">Module 9 · People</div><h1>People & HR</h1><p class="muted">A single view of the team, attendance, leave, shifts and hiring.</p></div></div>
-    <div class="tabs" id="ptabs">${tabs.map(([k,l])=>html`<button data-act="people-tab" data-v="${k}" class="${st.tab===k?"on":""}">${l}</button>`)}</div>
+    <div class="tabs" id="ptabs">${visibleTabs.map(([k,l])=>html`<button data-act="people-tab" data-v="${k}" class="${st.tab===k?"on":""}">${l}</button>`)}</div>
     <div id="peoplebody"><div class="card glass"><div class="sk" style="height:140px"></div></div></div>`);
   draw();
 }
