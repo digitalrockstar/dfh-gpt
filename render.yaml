@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: dfh-operations-demo
+    runtime: python
+    plan: standard
+    buildCommand: pip install -r requirements.txt
+    startCommand: alembic upgrade head && python -m dfh.deploy
+    healthCheckPath: /api/health
+    autoDeploy: true
+    disk:
+      name: dfh-demo-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.3
+      - key: DATABASE_URL
+        sync: false
+      - key: DFH_SECRET
+        generateValue: true
+      - key: DFH_ENV
+        value: production
+      - key: DFH_DATA
+        value: /var/data
