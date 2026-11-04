@@ -334,4 +334,68 @@ def run(engine, data_dir="data", seed=42, shrink=SHRINK, log=print):
             for i in range(0, len(rows), 5000): c.execute(insert(metadata.tables[name]), rows[i:i + 5000])
     u = {k: sum(1 for x in sugg if x["urgency"] == k) for k in ("critical", "soon", "plan")}
     return dict(run=rid, forecast_rows=C.n * HORIZON, suggestions=len(sugg), urgency=u, wape_city_cat=round(bt["levels"]["city_category_week"]["wape"], 3),
+                wape_store_sku=round(bt["levels"]["store_sku_week"]["wape"], 3), coverage=round(bt["band"]["coverage"], 3))    step = np.where(C.sk_loose[ps], 1000.0, 1.0)
+    oh = np.floor(oh / step) * step; oo = np.floor(oo / step) * step
+    # policy
+    val = Dq[pw, ps, :].sum(1) * uc; a_cut = np.quantile(val, .75); z = np.where(val >= a_cut, Z_A, Z_B)
+    rel = np.array([bt["categories"][CATS[C.sk_cat[s]]]["rel_wh"] or .15 for s in ps])
+    need_lead, need_cycle = _cum(R, lead), _cum(R, lead + REVIEW)
+    ov = np.clip((lead + REVIEW)[:, None] - 7 * np.arange(R.shape[1])[None, :], 0, 7); sigma = rel * np.sqrt(((R * ov) ** 2).sum(1)); ss = z * sigma
+    ip = oh + oo; need = need_cycle + ss - ip
+    t1 = _inv(R, oh); t2 = _inv(R, oh + oo); cov = np.where(t1 > eta, t2, t1)
+    sug = (need > 0) & ((need >= moq) | (ip < need_lead))
+    qty = np.ceil(np.maximum(need, moq) / step) * step
+    urg = np.where(cov < lead, "critical", np.where(cov - lead < 7, "soon", "plan"))
+    ob = [T_END + timedelta(days=int(max(0, min(365, math.floor(c - l))))) for c, l in zip(cov, lead)]
+    tot, base_t, kit_t = Dq[pw, ps, :].sum(1), Db[pw, ps, :].sum(1), Dk[pw, ps, :].sum(1)
+    fmt = lambda q, s: (f"{q / 1000:,.0f} kg" if q >= 1000 else f"{q:,.0f} g") if C.sk_loose[s] else f"{q:,.0f} units"
+    sugg = []
+    for i in np.nonzero(sug)[0]:
+        s = ps[i]; lift = tot[i] / base_t[i] - 1 if base_t[i] > 0 else 0.0
+        why = f"Stock lasts {cov[i]:.0f} days, lead time is {lead[i]:.0f} days." if cov[i] < 900 else f"Lead time is {lead[i]:.0f} days."
+        why += f" Festival demand adds {lift * 100:.0f}% over eight weeks." if lift >= .1 else ""
+        why += f" Gift boxes drive {kit_t[i] / tot[i] * 100:.0f}% of the need." if tot[i] and kit_t[i] / tot[i] >= .25 else ""
+        why += f" Cheapest vendor price is up {chg[i] * 100:.0f}% in 3 months." if chg[i] and chg[i] >= .08 else ""
+        sugg.append(dict(run_id=None, location_id=C.wh[pw[i]], sku_id=int(C.sk_id[s]), vendor_id=int(vid[i]), suggested_qty=int(qty[i]), approved_qty=None, unit_cost_paise=float(uc[i]), value_paise=int(qty[i] * uc[i]),
+                         on_hand=int(oh[i]), on_order=int(oo[i]), need_lead=int(need_lead[i]), need_cycle=int(need_cycle[i]), cover_days=float(round(min(cov[i], 999), 1)), lead_time_days=int(lead[i]), moq=int(moq[i]),
+                         urgency=str(urg[i]), order_by=ob[i], reason=why[:200], status="open", created_at=NOW, decided_by=None, decided_at=None))
+    req = [dict(run_id=None, location_id=C.wh[pw[i]], sku_id=int(C.sk_id[ps[i]]), need_qty=int(tot[i]), base_qty=int(base_t[i]), kit_qty=int(kit_t[i]), need_lead=int(need_lead[i])) for i in range(n)]
+    return sugg, req
+
+
+def run(engine, data_dir="data", seed=42, shrink=SHRINK, log=print):
+    C = Ctx(engine, data_dir); bt = backtest(C, shrink)
+    beta = learn_beta(C, T_END); lv = levels(C, T_END, beta, shrink); fw = week_factors(C, beta, T_END + timedelta(1), HORIZON)
+    Fq = project(C, lv, fw); Fb = project(C, lv, np.ones_like(fw))
+    r = C.con.execute("select sum(s.net_paise), sum(s.qty * k.price) from sales s join dim_sku k on k.id=s.sku_id where s.date > ?", [T_END - timedelta(WINDOW)]).fetchone(); real = float(r[0] / r[1])
+    ph = np.array([[bt["disp"][f"{c}_{u}"][0] for u in ("loose", "packed")] for c in CATS]); r2 = np.array([[bt["disp"][f"{c}_{u}"][1] for u in ("loose", "packed")] for c in CATS])
+    u_ix = np.where(C.sk_loose[C.a_sk], 0, 1); sg = np.sqrt(ph[C.sk_cat[C.a_sk], u_ix][:, None] * Fq + r2[C.sk_cat[C.a_sk], u_ix][:, None] * Fq * Fq)
+    lo, hi = np.maximum(0, Fq - 1.2816 * sg), Fq + 1.2816 * sg; price = C.sk_price[C.a_sk][:, None] * real
+    base_week = ((Fb * C.sk_price[C.a_sk][:, None]).sum(0) * real).tolist()
+    notes = dict(cutoff=str(T_END), beta=dict(zip(CATS, map(float, beta))), shrink_days=shrink, realisation=real, backtest=bt, chain_baseline_week_value=base_week,
+                 band="80 percent interval from error variance fitted per category on the backtest weeks",
+                 assumptions=["Festival shape comes from the festival calendar and is a planning assumption. Category sensitivity is learned from sales.",
+                              "No festival is modelled after Diwali because the calendar has none. Christmas and New Year are open items.",
+                              "On-hand comes from the Module 4 stock balance projection; open purchase commitments are derived from approved PO lines net of posted GRN receipts.",
+                              "Vendor cost is before freight, duty and clearing. Landed cost comes with Module 3.",
+                              "Packs roll up to bulk SKUs at 100 percent yield until repack yield is recorded.",
+                              "Safety stock uses z of 1.65 for the top quarter of SKUs by value and 1.28 for the rest."])
+    sugg, req = replenish(C, Fq, Fb, bt, seed, engine)
+    tabs = [metadata.tables[t] for t in ("reorder_suggestion", "demand_requirement", "forecast", "forecast_run")]
+    for t in tabs: t.drop(engine, checkfirst=True)          # rebuilt from the current schema, so the runner also works on older databases
+    metadata.create_all(engine, tables=tabs[::-1])
+    with engine.begin() as c:
+        rid = c.execute(insert(metadata.tables["forecast_run"]), dict(run_at=NOW, method=METHOD, horizon_weeks=HORIZON, wape=bt["levels"]["city_category_week"]["wape"], notes=json.dumps(notes))).inserted_primary_key[0]
+        ws = [T_END + timedelta(1 + 7 * w) for w in range(HORIZON)]; sid, kid = C.st_id[C.a_st], C.sk_id[C.a_sk]
+        for lo_i in range(0, C.n, 4000):
+            sl = slice(lo_i, lo_i + 4000)
+            rows = [dict(run_id=rid, store_id=int(sid[i]), sku_id=int(kid[i]), week_start=ws[w], qty_forecast=round(float(Fq[i, w]), 2), lower=round(float(lo[i, w]), 2), upper=round(float(hi[i, w]), 2), value_paise=int(Fq[i, w] * price[i, 0]))
+                    for i in range(lo_i, min(C.n, lo_i + 4000)) for w in range(HORIZON)]
+            c.execute(insert(metadata.tables["forecast"]), rows)
+        for x in sugg: x["run_id"] = rid
+        for x in req: x["run_id"] = rid
+        for name, rows in (("demand_requirement", req), ("reorder_suggestion", sugg)):
+            for i in range(0, len(rows), 5000): c.execute(insert(metadata.tables[name]), rows[i:i + 5000])
+    u = {k: sum(1 for x in sugg if x["urgency"] == k) for k in ("critical", "soon", "plan")}
+    return dict(run=rid, forecast_rows=C.n * HORIZON, suggestions=len(sugg), urgency=u, wape_city_cat=round(bt["levels"]["city_category_week"]["wape"], 3),
                 wape_store_sku=round(bt["levels"]["store_sku_week"]["wape"], 3), coverage=round(bt["band"]["coverage"], 3))
