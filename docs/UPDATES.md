@@ -1,5 +1,12 @@
 # UPDATES (newest first)
 
+## 2026-11-04 Module 10 Platform operations
+- Seed (dfh/seed/masters.py): five amount-based approval rules, three pending approval requests across procurement, stock adjustment and campaign work, and three sample import jobs (two completed, one failed).
+- API (dfh/platform_api.py): CEO/admin user role, activation and location-scope administration; approval rule creation/removal, request creation and role-based decisions; audit search; import-job history; device sync health; legal-entity view and monthly FX-rate upsert. Changes are audited. Self-lockout, overlapping approval bands, self-approval and deletion of rules with pending requests are blocked.
+- Screen (frontend/src/page_platform.js): Overview, Access, Approvals, Audit trail, System health, Entities and FX. Platform navigation is limited to authorized roles.
+- Tests: four new tests in tests/test_platform.py cover access permissions, approval workflow, audit records, sync/import views and FX. Full CI suite: 128 passed, 1 skipped.
+- Open: approval requests are a generic workflow and are not yet automatically raised by purchase-order or invoice actions; import jobs are displayed but there is no upload/worker pipeline; role definitions and legal entities are read-only catalogs; FX rates are maintained manually and do not retroactively revalue posted documents. Browser smoke testing of the Platform screens remains to be run.
+
 ## 2026-11-04 Module 8 Customers and WhatsApp
 - Seed (dfh/seed/crm.py, own random stream, about 3 s): 104k customer purchases and 105k loyalty transactions for the 25,000 customers, segments set by rule (New 4.2k, Regular 10.3k, Loyal 5.2k, Lapsing 2.7k, One-time 2.6k), 640 WhatsApp orders with lines, 3k chat messages, 6 approved templates, 7 campaigns, 29 corporate gifting quotes. Customer purchases are synthetic and are not linked to POS bills, because the sales history is aggregate.
 - Assumptions on screen: 1 loyalty point per Rs 50 spent, 1 point worth Rs 0.50, delivery Rs 49 and free above Rs 999, quote discounts 5% from 100 boxes, 10% from 300, 12% from 600.

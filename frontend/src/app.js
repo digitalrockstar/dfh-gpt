@@ -10,11 +10,12 @@ import * as inv from "./page_inv.js";
 import * as fin from "./page_finance.js";
 import * as crm from "./page_crm.js";
 import * as people from "./page_people.js";
+import * as platform from "./page_platform.js";
 
 const NAV = [
   ["Overview", [["control-tower", "Control Tower", 1, 1], ["skus", "SKU master", 2, 1]]],
   ["Operations", [["pos", "Store POS", "P", 1], ["inventory", "Inventory and warehouse", 4, 1], ["procurement", "Procurement and logistics", 3, 1], ["wastage", "Wastage and shrink", 5, 1], ["demand", "Demand and replenishment", 6, 1]]],
-  ["Business", [["finance", "Finance and tax", 7, 1], ["customers", "Customers and WhatsApp", 8, 1], ["hr", "People", 9, 1], ["platform", "Platform", 10, 0]]]];
+  ["Business", [["finance", "Finance and tax", 7, 1], ["customers", "Customers and WhatsApp", 8, 1], ["hr", "People", 9, 1], ["platform", "Platform", 10, 1]]]];
 const SOON = {
   inventory: ["A stock ledger by location and batch with expiry, so every kilo has a history.", "Batches, FEFO picking, transfers and in-transit stock", "Store indents, repacking with yield loss, cycle counts", "Bulk and corporate order desk"],
   procurement: ["Vendor price book, landed cost, purchase orders and shipment tracking from booking to receipt.", "Landed cost with freight, duty, clearing and FX", "GRN with batch and expiry, three-way match", "Vendor scorecards and best-vendor suggestions"],
@@ -44,7 +45,7 @@ if ("serviceWorker" in navigator) addEventListener("load", () => navigator.servi
 function shell() {
   const u = S.user;
   mount(root, html`<div class="app"><aside class="side glass"><div class="brand"><div class="mark">DFH</div><div><b>Dry Fruit House</b><span>Operations Platform</span></div></div>
-    <nav class="nav">${NAV.map(([g, items]) => html`<div class="grp">${g}</div>${items.map(([id, l, n, built]) => html`<a href="#/${built ? id : "soon/" + id}" data-id="${id}"><span class="n">${n}</span>${l}${built ? "" : html`<span class="soon">SOON</span>`}</a>`)}`)}</nav>
+    <nav class="nav">${NAV.map(([g, items]) => html`<div class="grp">${g}</div>${items.filter(([id]) => id !== "platform" || ["ceo", "admin", "finance", "procurement", "hr"].includes(u.role)).map(([id, l, n, built]) => html`<a href="#/${built ? id : "soon/" + id}" data-id="${id}"><span class="n">${n}</span>${l}${built ? "" : html`<span class="soon">SOON</span>`}</a>`)}`)}</nav>
     <div class="me"><div class="av">${u.name[0]}</div><div class="t"><b>${u.name}</b><span>${ROLE[u.role] || u.role}</span></div><button class="icon" data-act="settings" aria-label="Appearance" title="Appearance">◐</button><button class="icon" data-act="out" aria-label="Sign out" title="Sign out">⏻</button></div></aside><main id="view"></main></div>`);
 }
 acts.out = logout;
@@ -82,6 +83,7 @@ async function route0() {
   if (page === "finance") return fin.render(v);
   if (page === "customers") return crm.render(v);
   if (page === "hr") return people.render(v);
+  if (page === "platform") return platform.render(v);
   const d = SOON[param] || SOON.platform, label = NAV.flatMap(g => g[1]).find(x => x[0] === param);
   mount(v, html`<div class="head"><div><div class="eyebrow">${label ? "Module " + label[2] : ""}</div><h1>${label ? label[1] : "Coming soon"}</h1></div></div><div class="soonbox glass"><p>${d[0]}</p><ul>${d.slice(1).map(x => html`<li>${x}</li>`)}</ul><p class="small muted" style="margin-top:16px">Built after the modules above it. The plan and order are in the product book.</p></div>`);
 }
