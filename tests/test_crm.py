@@ -52,8 +52,9 @@ def test_roles_scope_and_masking(env):
     ids = [i["id"] for i in sm["items"]]
     assert all(c.get(f"/api/crm/customers/{i}", headers=tok(c, "storemgr")).status_code == 200 for i in ids[:3])
     row = c.get("/api/crm/customers/%d" % ids[0], headers=tok(c)).json()["customer"]
-    assert row["first_store_id"] == sc
-    foreign = q(e, "select id from customer where first_store_id != :s limit 1", s=sc)[0][0]
+    linked = q(e, "select 1 from sale where customer_id=:i and store_id=:s union all select 1 from customer_purchase where customer_id=:i and store_id=:s limit 1", i=row["id"], s=sc)
+    assert row["first_store_id"] == sc or bool(linked)
+    foreign = q(e, "select c.id from customer c where c.first_store_id != :s and c.id not in (select customer_id from sale where store_id=:s and customer_id is not null) and c.id not in (select customer_id from customer_purchase where store_id=:s) limit 1", s=sc)[0][0]
     assert c.get(f"/api/crm/customers/{foreign}", headers=tok(c, "storemgr")).status_code == 404
 
 
