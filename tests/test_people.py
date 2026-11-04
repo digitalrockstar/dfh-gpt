@@ -48,7 +48,7 @@ def test_people_seed_and_permissions(env):
 
 def test_employee_profile_and_attendance(env):
     c, e = env; h = token(c, "hr")
-    eid = q(e, "select id from employee where status='active' order by id limit 1")[0][0]
+    eid = q(e, "select id from employee where status='active' and join_date<='2026-10-31' order by id limit 1")[0][0]
     detail = c.get(f"/api/people/employees/{eid}", headers=h)
     assert detail.status_code == 200 and detail.json()["department"] and detail.json()["designation"]
     assert detail.json()["attendance"]
