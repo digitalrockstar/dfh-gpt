@@ -7,11 +7,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import text
 from . import auth
+from .clock import current_time
 from .analytics import Analytics
 from .db import get_engine
 from . import wastage_api, demand_api, procurement_api, pos_api, finance_api, ct_api, crm_api
 
-NOW = datetime(2026, 10, 31, 9, 0)           # demo "now", matches the seeded data
 STATUSES = ["draft", "active", "restricted", "delisted"]
 MOVES = {"draft": {"active", "delisted"}, "active": {"restricted", "delisted"}, "restricted": {"active", "delisted"}, "delisted": {"active"}}
 CT_ROLES = {"ceo", "finance", "admin", "procurement", "warehouse", "store_manager", "marketing"}
@@ -43,6 +43,7 @@ class ImportIn(BaseModel):
 
 
 def create_app(db_url=None, data_dir=None, serve_frontend=True):
+    now = current_time()
     engine = get_engine(db_url)
     data_dir = data_dir or os.getenv("DFH_DATA", "data")
     an = Analytics(engine, data_dir)
@@ -77,7 +78,7 @@ def create_app(db_url=None, data_dir=None, serve_frontend=True):
 
     def audit(c, u, action, table, row_id, before, after):
         c.execute(text("insert into audit_log(ts, user_id, action, table_name, row_id, before, after) values (:t,:u,:a,:tb,:r,:b,:af)"),
-                  dict(t=NOW, u=u["id"], a=action, tb=table, r=str(row_id), b=json.dumps(before), af=json.dumps(after)))
+                  dict(t=now, u=u["id"], a=action, tb=table, r=str(row_id), b=json.dumps(before), af=json.dumps(after)))
 
     @app.get("/api/health")
     def health(): return dict(ok=True, data_through=str(an.max_date))
@@ -191,7 +192,7 @@ def create_app(db_url=None, data_dir=None, serve_frontend=True):
                 for s, ch, patch in plan:
                     c.execute(text("update sku set " + ", ".join(f"{k}=:{k}" for k in ch) + " where id=:i"), dict(ch, i=s["id"]))
                     audit(c, u, "import", "sku", s["id"], {k: s[k] for k in ch}, ch)
-                c.execute(text("insert into import_job(kind, filename, status, rows_ok, rows_err, created_at) values ('sku_prices','upload','applied',:o,0,:t)"), dict(o=len(plan), t=NOW))
+                c.execute(text("insert into import_job(kind, filename, status, rows_ok, rows_err, created_at) values ('sku_prices','upload','applied',:o,0,:t)"), dict(o=len(plan), t=now))
             applied = True
         return dict(rows=len(rd), ok=len(plan), errors=errs, applied=applied)
 
@@ -199,12 +200,12 @@ def create_app(db_url=None, data_dir=None, serve_frontend=True):
     def filters(u, region, tier, city, fmt=""):
         return dict(region=region or None, tier=tier or None, city=city or None, fmt=fmt or None, store_ids=scope(u))
 
-    wa = wastage_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, NOW=NOW))
-    da = demand_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, NOW=NOW))
-    pos_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, NOW=NOW))
-    fa = finance_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, NOW=NOW))
-    ca = crm_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, NOW=NOW))
-    pa = procurement_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, NOW=NOW))
+    wa = wastage_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, **{"NOW": now}))
+    da = demand_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, **{"NOW": now}))
+    pos_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, **{"NOW": now}))
+    fa = finance_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, **{"NOW": now}))
+    ca = crm_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, **{"NOW": now}))
+    pa = procurement_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, **{"NOW": now}))
     ct = need(CT_ROLES)
 
     @app.get("/api/ct/summary")
@@ -227,7 +228,7 @@ def create_app(db_url=None, data_dir=None, serve_frontend=True):
         out = []
         for r in many("select id, name, city, last_sync_at from location where type='store' and last_sync_at is not null order by last_sync_at limit 400"):
             ls = r["last_sync_at"] if isinstance(r["last_sync_at"], datetime) else datetime.fromisoformat(str(r["last_sync_at"]))
-            hrs = (NOW - ls).total_seconds() / 3600
+            hrs = (now - ls).total_seconds() / 3600
             if hrs >= 24 and (f["store_ids"] is None or r["id"] in f["store_ids"]):
                 out.append(dict(type="sync", severity="high", title=f"{r['name']} has not synced for {int(hrs // 24)} days", detail=f"{r['city']}. Last sync {ls:%d %b, %H:%M}. Bills may be queued on the device.", ref=r["id"]))
         for h in an.stockout_hotspots(30, **f):
@@ -246,14 +247,14 @@ def create_app(db_url=None, data_dir=None, serve_frontend=True):
     def ct_exc(region: str = "", tier: str = "", city: str = "", fmt: str = "", u=Depends(ct)):
         return exceptions_for(filters(u, region, tier, city, fmt))
 
-    ct_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, NOW=NOW), exceptions_for, ct, filters)
+    ct_api.attach(app, dict(me=me, need=need, many=many, one=one, audit=audit, engine=engine, an=an, **{"NOW": now}), exceptions_for, ct, filters)
 
     @app.get("/api/ct/filters")
     def ct_filters(u=Depends(ct)):
         return dict(formats=[r["format"] for r in many("select distinct format from location where type='store' and format is not null order by format")], regions=[r["region"] for r in many("select distinct region from location where type='store' order by region")], cities=[r["city"] for r in many("select distinct city from location where type='store' order by city")])
 
     from .inventory import register as register_inventory
-    register_inventory(app, engine, one, many, me, need, audit, NOW)
+    register_inventory(app, engine, one, many, me, need, audit, now)
 
     if serve_frontend:
         web = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
