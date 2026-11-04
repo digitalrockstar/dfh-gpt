@@ -75,12 +75,12 @@ def attach(app, ctx):
     @app.get("/api/platform/summary")
     def summary(u=Depends(reader)):
         return dict(
-            users=one("select count(*) n, sum(case when active=1 then 1 else 0 end) active from app_user"),
+            users=one("select count(*) n, sum(case when active then 1 else 0 end) active from app_user"),
             pending_approvals=one("select count(*) n, coalesce(sum(amount_paise),0) amount from approval_request where status='pending'"),
             audit_today=one("select count(*) n from audit_log where ts>=:s", s=str(datetime.combine(today, datetime.min.time()))),
             imports=one("select count(*) n, sum(case when status in ('queued','running','failed') then 1 else 0 end) attention from import_job"),
             devices=one("select count(*) n, sum(case when active=1 then 1 else 0 end) active from device"),
-            stale_devices=one("select count(*) n from device where active=1 and (last_seen_at is null or last_seen_at<:cut)", cut=str(NOW-timedelta(hours=24))),
+            stale_devices=one("select count(*) n from device where active=true and (last_seen_at is null or last_seen_at<:cut)", cut=str(NOW-timedelta(hours=24))),
             entities=one("select count(*) n from legal_entity"),
             latest_audit=many("select a.id,a.ts,a.action,a.table_name,a.row_id,u.username,u.name from audit_log a left join app_user u on u.id=a.user_id order by a.ts desc,a.id desc limit 8"))
 
@@ -94,7 +94,7 @@ def attach(app, ctx):
         if role:
             where.append("r.code=:role"); p["role"] = role
         if active in ("0", "1"):
-            where.append("u.active=:active"); p["active"] = int(active)
+            where.append("u.active=:active"); p["active"] = active == "1"
         clause = " where " + " and ".join(where)
         total = one("select count(*) n from app_user u join role r on r.id=u.role_id" + clause, **p)["n"]
         items = many("select u.id,u.username,u.name,u.active,u.scope_type,u.scope_id,u.last_login,r.id role_id,r.code role,r.name role_name,l.name scope_name "
@@ -126,7 +126,7 @@ def attach(app, ctx):
         else:
             if scope_id is None:
                 raise HTTPException(422, "Choose a location for this scope")
-            loc = one("select id,type from location where id=:i and active=1", i=scope_id)
+            loc = one("select id,type from location where id=:i and active=true", i=scope_id)
             if not loc or loc["type"] != scope_type:
                 raise HTTPException(422, "Location does not match the selected scope")
         allowed = {"role_id", "scope_type", "scope_id", "active"}
