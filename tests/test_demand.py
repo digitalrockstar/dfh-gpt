@@ -164,3 +164,9 @@ def test_live_demand_supply_uses_inventory_and_procurement_records(client, eng):
     assert row["on_hand"] == stock
     assert row["on_order"] == max(0, orders)
     assert row["available"] == row["on_hand"] + row["on_order"]
+
+
+def test_replenishment_suggestions_do_not_persist_stock_snapshot(client, eng):
+    row = q(eng, "select on_hand, on_order from reorder_suggestion order by id limit 1")[0]
+    assert row == (0, 0)
+    assert "stock_position" not in __import__("inspect").getsource(__import__("dfh.demand.model", fromlist=["run"]))
