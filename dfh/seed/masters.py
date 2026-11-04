@@ -274,6 +274,31 @@ def build_masters(rng, seed=42):
         ("warehouse", "Warehouse (demo)", 4, "warehouse", wh1["id"]), ("storemgr", "Store manager (demo)", 5, "store", st1["id"]),
         ("cashier", "Cashier (demo)", 6, "store", st1["id"]), ("hr", "HR (demo)", 7, "all", None), ("marketing", "Marketing (demo)", 8, "all", None), ("admin", "Admin (demo)", 9, "all", None)]]
 
+    # Platform demo configuration and operational queue.
+    T["approval_rule"] = [
+        dict(doc_type="purchase_order", min_amount_paise=5_000_000, max_amount_paise=25_000_000, approver_role_id=2),
+        dict(doc_type="purchase_order", min_amount_paise=25_000_001, max_amount_paise=None, approver_role_id=1),
+        dict(doc_type="stock_adjustment", min_amount_paise=100_000, max_amount_paise=500_000, approver_role_id=4),
+        dict(doc_type="campaign", min_amount_paise=500_000, max_amount_paise=None, approver_role_id=1),
+        dict(doc_type="loyalty_adjustment", min_amount_paise=50_000, max_amount_paise=None, approver_role_id=2),
+    ]
+    T["approval_request"] = [
+        dict(doc_type="purchase_order", doc_id="PO-DFH-2026-1187", requested_by=3, status="pending", approver_id=None,
+             amount_paise=8_450_000, created_at=NOW - timedelta(hours=19), decided_at=None, note="Seasonal replenishment order."),
+        dict(doc_type="stock_adjustment", doc_id="ADJ-WH-HYD-047", requested_by=5, status="pending", approver_id=None,
+             amount_paise=245_000, created_at=NOW - timedelta(hours=7), decided_at=None, note="Cycle-count variance at store."),
+        dict(doc_type="campaign", doc_id="CMP-DIWALI-2026", requested_by=8, status="pending", approver_id=None,
+             amount_paise=650_000, created_at=NOW - timedelta(hours=3), decided_at=None, note="Diwali customer campaign budget."),
+    ]
+    T["import_job"] = [
+        dict(kind="sku_master", filename="sku_master_oct_2026.csv", status="completed", rows_ok=1248, rows_err=0,
+             created_at=NOW - timedelta(days=2), report=dict(message="All rows validated and applied.", synthetic=True)),
+        dict(kind="fx_rates", filename="monthly_fx_rates_oct_2026.csv", status="completed", rows_ok=42, rows_err=0,
+             created_at=NOW - timedelta(days=1), report=dict(message="Rates loaded for active reporting currencies.", synthetic=True)),
+        dict(kind="store_stock", filename="store_stock_adjustment_hyd.csv", status="failed", rows_ok=461, rows_err=7,
+             created_at=NOW - timedelta(hours=5), report=dict(message="Seven rows rejected: unknown SKU or negative quantity.", synthetic=True)),
+    ]
+
     # planted findings
     pune = [s["id"] for s in stores if s["code"].split("-")[1] == "PNQ"]
     hot = [s["id"] for s in skus if any(k in s["name"] for k in ("Almonds California Regular", "Almonds California Premium", "Cashews Whole W320", "Cashews Whole W240"))]
