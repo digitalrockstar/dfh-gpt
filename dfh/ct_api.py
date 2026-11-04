@@ -164,7 +164,7 @@ def attach(app, ctx, exceptions_for, ct_guard, filters):
                      "from sale_line sl join sku sk on sk.id=sl.sku_id where sl.sale_id=:i order by sl.id", i=bill_id)
         payments = many("select mode,amount_paise,status,ref from payment where sale_id=:i order by id", i=bill_id)
         returns = many("select r.id,r.return_no,r.created_at,r.reason,r.status,r.refund_paise,coalesce(sum(rl.qty),0) returned_qty "
-                       "from sale_return r left join sale_return_line rl on rl.return_id=r.id where r.sale_id=:i group by r.id order by r.created_at desc", i=bill_id)
+                       "from sale_return r left join sale_return_line rl on rl.return_id=r.id where r.sale_id=:i group by r.id,r.return_no,r.created_at,r.reason,r.status,r.refund_paise order by r.created_at desc", i=bill_id)
         for r in returns: r["created_at"] = str(r["created_at"])
         for x in lines:
             x["qty_label"] = (f'{x["qty"] / 1000:g} kg' if x["base_uom"] == "g" else f'{x["qty"]} units')
