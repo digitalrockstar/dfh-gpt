@@ -76,6 +76,9 @@ def attach(app, ctx):
             raise HTTPException(404, "Employee not found")
         return e
 
+    def serial(values):
+        return {k: (v.isoformat() if isinstance(v, (date, datetime)) else v) for k, v in values.items()}
+
     def paged(page, size):
         return max(1, page), max(5, min(size, 100))
 
@@ -158,7 +161,7 @@ def attach(app, ctx):
             else:
                 rid=c.execute(text("insert into attendance(employee_id,date,punch_in,punch_out,source,location_id,hours,status) values (:employee_id,:date,:punch_in,:punch_out,:source,:location_id,:hours,:status) returning id"),values).scalar()
                 action="create"
-            audit(c,u,action,"attendance",rid,dict(old) if old else None,values)
+            audit(c,u,action,"attendance",rid,serial(dict(old)) if old else None,serial(values))
         return dict(id=rid,ok=True)
 
     @app.get("/api/people/roster")
@@ -181,7 +184,7 @@ def attach(app, ctx):
                 c.execute(text("update roster set shift_id=:s,location_id=:l where id=:i"),{"s":b.shift_id,"l":b.location_id,"i":old}); rid=old
             else:
                 rid=c.execute(text("insert into roster(employee_id,date,shift_id,location_id) values (:e,:d,:s,:l) returning id"),{"e":b.employee_id,"d":b.date,"s":b.shift_id,"l":b.location_id}).scalar()
-            audit(c,u,"assign","roster",rid,None,b.model_dump())
+            audit(c,u,"assign","roster",rid,None,serial(serial(b.model_dump())))
         return dict(id=rid,ok=True)
 
     @app.get("/api/people/leaves")
@@ -212,7 +215,7 @@ def attach(app, ctx):
         if r["status"]!="pending": raise HTTPException(409,"This request has already been decided")
         with engine.begin() as c:
             c.execute(text("update leave_request set status=:s,approver_id=:u where id=:i"),{"s":"approved" if b.decision=="approve" else "rejected","u":u["id"],"i":rid})
-            audit(c,u,b.decision,"leave_request",rid,dict(r),{"status":"approved" if b.decision=="approve" else "rejected","note":b.note})
+            audit(c,u,b.decision,"leave_request",rid,serial(dict(r)),{"status":"approved" if b.decision=="approve" else "rejected","note":b.note})
         return dict(id=rid,status="approved" if b.decision=="approve" else "rejected")
 
     @app.get("/api/people/onboarding")
@@ -229,7 +232,7 @@ def attach(app, ctx):
         done=None if r["done_at"] else NOW
         with engine.begin() as c:
             c.execute(text("update onboarding_task set done_at=:d where id=:i"),{"d":done,"i":tid})
-            audit(c,u,"toggle","onboarding_task",tid,dict(r),{"done_at":done})
+            audit(c,u,"toggle","onboarding_task",tid,serial(dict(r)),{"done_at":done.isoformat() if done else None})
         return dict(id=tid,done_at=done)
 
     @app.get("/api/people/jobs")
