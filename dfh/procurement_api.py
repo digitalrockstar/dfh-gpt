@@ -235,10 +235,6 @@ def attach(app, ctx):
                 audit(c, u, "create", "purchase_order", nxt, None, dict(source="suggestions", lines=len(lines), total_minor=total)); made.append(dict(id=nxt, po_no=f"PO-{TODAY:%y%m}-{nxt:04d}", lines=len(lines)))
         return dict(created=made)
 
-    def bump_order(c, p, sign):
-        for l in lines_of(p["id"]):
-            row = c.execute(text("select on_order from stock_position where location_id=:l and sku_id=:s"), dict(l=p["dest_location_id"], s=l["sku_id"])).first()
-            if row: c.execute(text("update stock_position set on_order=:o where location_id=:l and sku_id=:s"), dict(o=max(0, row[0] + sign * l["qty"]), l=p["dest_location_id"], s=l["sku_id"]))
 
     @app.post("/api/procurement/pos/{pid}/action")
     def po_action(pid: int, b: POAction, u=Depends(need(PO_WRITE))):
@@ -262,9 +258,7 @@ def attach(app, ctx):
                 try: ex = date.fromisoformat(b.expected_date)
                 except ValueError: raise HTTPException(422, "Use a date like 2026-11-20")
             c.execute(text("update purchase_order set status=:s, approved_by=coalesce(:a, approved_by), expected_date=coalesce(:e, expected_date) where id=:i"), dict(s=new, a=u["id"] if b.action == "approve" else None, e=ex, i=pid))
-            if b.action == "approve": bump_order(c, p, 1)
             if b.action == "cancel":
-                if st in ("approved", "confirmed"): bump_order(c, p, -1)
                 c.execute(text("update reorder_suggestion set po_id=null, status='approved' where po_id=:p"), dict(p=pid))
             audit(c, u, b.action, "purchase_order", pid, dict(status=st), dict(status=new, note=b.note))
         return dict(id=pid, status=new)
@@ -380,9 +374,6 @@ def attach(app, ctx):
                 c.execute(text("insert into grn_line(grn_id, sku_id, batch_id, qty_received, qty_accepted, qty_rejected, reject_reason, unit_cost_paise) values (:g,:s,:b,:r,:a,:j,:rs,:u)"), dict(g=gid, s=l["sku_id"], b=bid, r=x.qty_received, a=acc, j=x.qty_rejected, rs=(x.reject_reason or None) if x.qty_rejected else None, u=uc))
                 if x.qty_rejected:
                     c.execute(text("insert into debit_note(vendor_id, grn_id, amount_paise, reason, created_at) values (:v,:g,:a,:r,:t)"), dict(v=p["vendor_id"], g=gid, a=inr(line_minor(x.qty_rejected, l["price_minor"], l["base_uom"]), p["fx_rate"]), r=f"Rejected on receipt: {x.reject_reason}", t=NOW))
-                row = c.execute(text("select on_hand, on_order from stock_position where location_id=:l and sku_id=:s"), dict(l=p["dest_location_id"], s=l["sku_id"])).first()
-                if row: c.execute(text("update stock_position set on_hand=:h, on_order=:o where location_id=:l and sku_id=:s"), dict(h=row[0] + acc, o=max(0, row[1] - x.qty_received), l=p["dest_location_id"], s=l["sku_id"]))
-                else: c.execute(text("insert into stock_position(location_id, sku_id, on_hand, on_order, eta_days, as_of) values (:l,:s,:h,0,0,:d)"), dict(l=p["dest_location_id"], s=l["sku_id"], h=acc, d=TODAY))
             tot = {r[0]: r[1] for r in c.execute(text("select gl.sku_id, sum(gl.qty_received) from grn g join grn_line gl on gl.grn_id=g.id where g.po_id=:p group by 1"), dict(p=pid))}
             full = all(tot.get(s, 0) >= l["qty"] * .95 for s, l in ls.items()); new = "received" if full else "partial"
             c.execute(text("update purchase_order set status=:s where id=:i"), dict(s=new, i=pid))

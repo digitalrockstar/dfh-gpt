@@ -43,6 +43,25 @@ def attach(app, ctx):
 
     def wh_scope(u):
         return [u["scope_id"]] if u["scope_type"] == "warehouse" else None
+    def live_supply(wh_ids=None):
+        """Current on-hand from stock balance and outstanding commitments from approved POs net of posted receipts."""
+        loc_filter = ""
+        if wh_ids is not None:
+            ids = sorted({int(x) for x in wh_ids})
+            loc_filter = f" and p.dest_location_id in ({','.join(map(str, ids))})" if ids else " and 1=0"
+        rows = many(
+            "select p.dest_location_id location_id, pl.sku_id, sum(pl.qty - coalesce(gr.received,0)) on_order "
+            "from purchase_order p join purchase_order_line pl on pl.po_id=p.id "
+            "left join (select g.po_id, gl.sku_id, sum(gl.qty_received) received from grn g join grn_line gl on gl.grn_id=g.id "
+            "where g.status='posted' group by g.po_id, gl.sku_id) gr on gr.po_id=p.id and gr.sku_id=pl.sku_id "
+            "where p.status in ('approved','confirmed','in_transit','partial')" + loc_filter +
+            " group by p.dest_location_id, pl.sku_id"
+        )
+        commitments = {(r["location_id"], r["sku_id"]): max(0, int(r["on_order"] or 0)) for r in rows}
+        stock = many("select location_id, sku_id, sum(qty) on_hand from stock_balance group by location_id, sku_id")
+        on_hand = {(r["location_id"], r["sku_id"]): int(r["on_hand"] or 0) for r in stock}
+        return on_hand, commitments
+
 
     def inlist(col, ids): return f"{col} in ({','.join(str(int(x)) for x in ids) or '-1'})"
 
@@ -126,6 +145,12 @@ def attach(app, ctx):
         items = many("select r.id, r.location_id, l.name wh_name, l.city, r.sku_id, s.code, s.name, s.base_uom, c.name cat, r.vendor_id, v.name vendor, v.country, r.suggested_qty, r.approved_qty, r.unit_cost_paise, r.value_paise, r.on_hand, r.on_order, "
                      "r.need_lead, r.need_cycle, r.cover_days, r.lead_time_days, r.moq, r.urgency, r.order_by, r.reason, r.status, r.decided_at " + SUG + w +
                      " order by case r.urgency when 'critical' then 0 when 'soon' then 1 else 2 end, r.value_paise desc, r.id limit :lim offset :off", **p, lim=size, off=(max(1, page) - 1) * size)
+        on_hand, on_order = live_supply(wh_scope(u))
+        for item in items:
+            key = (item["location_id"], item["sku_id"])
+            item["on_hand"] = on_hand.get(key, 0)
+            item["on_order"] = on_order.get(key, 0)
+            item["available"] = item["on_hand"] + item["on_order"]
         return dict(total=tot["n"], value=int(tot["v"]), counts=counts, page=page, size=size, items=items)
 
     @app.post("/api/demand/suggestions/{sid}/decision")
@@ -154,9 +179,14 @@ def attach(app, ctx):
     def kit_rows(u):
         kits = many("select s.id, s.code, s.name, sum(f.qty_forecast) units from forecast f join sku s on s.id=f.sku_id where s.procurement_type='kit' group by s.id having units > 0")
         if not kits: return []
-        rr = many("select q.sku_id, sum(q.need_lead) d, sum(case when p.on_hand + p.on_order < q.need_lead then p.on_hand + p.on_order else q.need_lead end) a "
-                  "from demand_requirement q join stock_position p on p.location_id=q.location_id and p.sku_id=q.sku_id group by 1")
-        avail = {r["sku_id"]: r["a"] for r in rr}; demand = {r["sku_id"]: r["d"] for r in rr}
+        on_hand, on_order = live_supply()
+        rr = many("select q.location_id, q.sku_id, sum(q.need_lead) d from demand_requirement q group by q.location_id, q.sku_id")
+        avail, demand = {}, {}
+        for r in rr:
+            sku = r["sku_id"]; key = (r["location_id"], sku)
+            available = max(0, on_hand.get(key, 0)) + on_order.get(key, 0)
+            demand[sku] = demand.get(sku, 0) + r["d"]
+            avail[sku] = avail.get(sku, 0) + min(available, r["d"])
         bom = many("select k.kit_sku_id, c.id cid, c.name cname, c.procurement_type pt, c.pack_g, c.bulk_sku_id, k.qty from kit_bom k join sku c on c.id=k.component_sku_id")
         by = {}
         for r in bom: by.setdefault(r["kit_sku_id"], []).append(r)

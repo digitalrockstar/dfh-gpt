@@ -244,7 +244,7 @@ def _inv(R, y):
     return np.minimum(t, 999.0)
 
 
-def replenish(C, Fq, Fb, bt, seed):
+def replenish(C, Fq, Fb, bt, seed, engine):
     S, NW = len(C.sk_id), len(C.wh)
     whi = C.st_wh[C.a_st]; ok = whi >= 0
     def dense(F):
@@ -258,16 +258,24 @@ def replenish(C, Fq, Fb, bt, seed):
     best = [cost[int(C.sk_id[s])][0] for s in ps]
     uc = np.array([b[0] for b in best]); vid = np.array([b[1] for b in best]); moq = np.array([float(b[2]) for b in best]); lead = np.array([b[3] for b in best], float)
     chg = [b[4] for b in best]
-    # modelled stock position until Module 4 (ledger) and Module 3 (open POs) exist
-    base_d = Rb[:, :4].mean(1); cover = np.maximum(2.0, (lead + 14) * COVER_X + rng.normal(0, COVER_S, n))
-    oh = base_d * cover; has = rng.random(n) < .45; oo = np.where(has, base_d * lead * rng.uniform(.2, .9, n), 0.0); eta = np.where(has, rng.integers(2, np.maximum(3, lead.astype(int) + 1)), 0)
-    pune = {int(C.st_wh[C.tx[s]]) for s in C.f3["store_ids"]}
-    f3t = {C.sx[C.sk_bulk[C.sx[s]]] if C.sk_type[C.sx[s]] == "repacked" else C.sx[s] for s in C.f3["sku_ids"]}
-    kitt = {t for s, t, m, kd in E if kd == "kit" and int(C.sk_id[s]) in set(C.f7["kit_sku_ids"])}
-    f7w = set(rng.choice(NW, 5, replace=False).tolist())      # the gift box component shortage hits five warehouses
-    for i in range(n):
-        if pw[i] in pune and ps[i] in f3t: oh[i] = base_d[i] * rng.uniform(3, 8); oo[i] = 0; eta[i] = 0
-        elif ps[i] in kitt and pw[i] in f7w and rng.random() < .8: oh[i] = base_d[i] * rng.uniform(8, 18); oo[i] = 0; eta[i] = 0
+    # Operational supply is sourced from inventory balances and PO/GRN lifecycle records.
+    oh, oo, eta = np.zeros(n), np.zeros(n), np.zeros(n)
+    with engine.connect() as conn:
+        stock_rows = conn.execute(text("select location_id, sku_id, sum(qty) from stock_balance group by location_id, sku_id")).fetchall()
+        stock = {(r[0], r[1]): float(r[2] or 0) for r in stock_rows}
+        order_rows = conn.execute(text(
+            "select p.dest_location_id, pl.sku_id, sum(pl.qty-coalesce(gr.received,0)) "
+            "from purchase_order p join purchase_order_line pl on pl.po_id=p.id "
+            "left join (select g.po_id, gl.sku_id, sum(gl.qty_received) received from grn g join grn_line gl on gl.grn_id=g.id "
+            "where g.status='posted' group by g.po_id, gl.sku_id) gr on gr.po_id=p.id and gr.sku_id=pl.sku_id "
+            "where p.status in ('approved','confirmed','in_transit','partial') group by p.dest_location_id,pl.sku_id"
+        )).fetchall()
+        commitments = {(r[0], r[1]): max(0.0, float(r[2] or 0)) for r in order_rows}
+    for i, (loc, sku) in enumerate(zip((C.wh[int(w)] for w in pw), C.sk_id[ps])):
+        key = (int(loc), int(sku))
+        oh[i] = stock.get(key, 0.0)
+        oo[i] = commitments.get(key, 0.0)
+        eta[i] = 0 if oo[i] <= 0 else min(7, max(1, lead[i]))
     step = np.where(C.sk_loose[ps], 1000.0, 1.0)
     oh = np.floor(oh / step) * step; oo = np.floor(oo / step) * step
     # policy
@@ -291,11 +299,10 @@ def replenish(C, Fq, Fb, bt, seed):
         why += f" Gift boxes drive {kit_t[i] / tot[i] * 100:.0f}% of the need." if tot[i] and kit_t[i] / tot[i] >= .25 else ""
         why += f" Cheapest vendor price is up {chg[i] * 100:.0f}% in 3 months." if chg[i] and chg[i] >= .08 else ""
         sugg.append(dict(run_id=None, location_id=C.wh[pw[i]], sku_id=int(C.sk_id[s]), vendor_id=int(vid[i]), suggested_qty=int(qty[i]), approved_qty=None, unit_cost_paise=float(uc[i]), value_paise=int(qty[i] * uc[i]),
-                         on_hand=int(oh[i]), on_order=int(oo[i]), need_lead=int(need_lead[i]), need_cycle=int(need_cycle[i]), cover_days=float(round(min(cov[i], 999), 1)), lead_time_days=int(lead[i]), moq=int(moq[i]),
+                         on_hand=0, on_order=0, need_lead=int(need_lead[i]), need_cycle=int(need_cycle[i]), cover_days=float(round(min(cov[i], 999), 1)), lead_time_days=int(lead[i]), moq=int(moq[i]),
                          urgency=str(urg[i]), order_by=ob[i], reason=why[:200], status="open", created_at=NOW, decided_by=None, decided_at=None))
-    pos = [dict(location_id=C.wh[pw[i]], sku_id=int(C.sk_id[ps[i]]), on_hand=int(oh[i]), on_order=int(oo[i]), eta_days=int(eta[i]), as_of=T_END) for i in range(n)]
     req = [dict(run_id=None, location_id=C.wh[pw[i]], sku_id=int(C.sk_id[ps[i]]), need_qty=int(tot[i]), base_qty=int(base_t[i]), kit_qty=int(kit_t[i]), need_lead=int(need_lead[i])) for i in range(n)]
-    return sugg, pos, req
+    return sugg, req
 
 
 def run(engine, data_dir="data", seed=42, shrink=SHRINK, log=print):
@@ -311,12 +318,12 @@ def run(engine, data_dir="data", seed=42, shrink=SHRINK, log=print):
                  band="80 percent interval from error variance fitted per category on the backtest weeks",
                  assumptions=["Festival shape comes from the festival calendar and is a planning assumption. Category sensitivity is learned from sales.",
                               "No festival is modelled after Diwali because the calendar has none. Christmas and New Year are open items.",
-                              "Stock on hand and on order are a modelled snapshot until Module 4 (ledger) and Module 3 (purchase orders) exist.",
+                              "On-hand comes from the Module 4 stock balance projection; open purchase commitments are derived from approved PO lines net of posted GRN receipts.",
                               "Vendor cost is before freight, duty and clearing. Landed cost comes with Module 3.",
                               "Packs roll up to bulk SKUs at 100 percent yield until repack yield is recorded.",
                               "Safety stock uses z of 1.65 for the top quarter of SKUs by value and 1.28 for the rest."])
-    sugg, pos, req = replenish(C, Fq, Fb, bt, seed)
-    tabs = [metadata.tables[t] for t in ("reorder_suggestion", "demand_requirement", "stock_position", "forecast", "forecast_run")]
+    sugg, req = replenish(C, Fq, Fb, bt, seed, engine)
+    tabs = [metadata.tables[t] for t in ("reorder_suggestion", "demand_requirement", "forecast", "forecast_run")]
     for t in tabs: t.drop(engine, checkfirst=True)          # rebuilt from the current schema, so the runner also works on older databases
     metadata.create_all(engine, tables=tabs[::-1])
     with engine.begin() as c:
@@ -329,7 +336,7 @@ def run(engine, data_dir="data", seed=42, shrink=SHRINK, log=print):
             c.execute(insert(metadata.tables["forecast"]), rows)
         for x in sugg: x["run_id"] = rid
         for x in req: x["run_id"] = rid
-        for name, rows in (("stock_position", pos), ("demand_requirement", req), ("reorder_suggestion", sugg)):
+        for name, rows in (("demand_requirement", req), ("reorder_suggestion", sugg)):
             for i in range(0, len(rows), 5000): c.execute(insert(metadata.tables[name]), rows[i:i + 5000])
     u = {k: sum(1 for x in sugg if x["urgency"] == k) for k in ("critical", "soon", "plan")}
     return dict(run=rid, forecast_rows=C.n * HORIZON, suggestions=len(sugg), urgency=u, wape_city_cat=round(bt["levels"]["city_category_week"]["wape"], 3),
