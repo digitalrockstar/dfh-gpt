@@ -74,7 +74,7 @@ def run(eng, seed=42, data="data"):
                   [dict(i=v["i"], o=v["o"], s=v["s"], l=v["l"], g=v["g"], p=pts_by.get(v["i"], 0)) for v in stat.values()])
 
         # templates
-        c.execute(text("insert into wa_template(code, name, category, body, approved) values (:c,:n,:k,:b,1)"), [dict(c=a, n=b, k=k, b=t) for a, b, k, t in TEMPLATES])
+        c.execute(text("insert into wa_template(code, name, category, body, approved) values (:c,:n,:k,:b,true)"), [dict(c=a, n=b, k=k, b=t) for a, b, k, t in TEMPLATES])
 
         # WhatsApp orders and chats
         skus = [dict(r._mapping) for r in c.execute(text("select id, name, mrp_paise from sku where status='active' and base_uom='ea' and procurement_type in ('repacked','finished') and mrp_paise is not null order by popularity desc limit 160"))]
