@@ -184,7 +184,7 @@ def attach(app, ctx):
                 c.execute(text("update roster set shift_id=:s,location_id=:l where id=:i"),{"s":b.shift_id,"l":b.location_id,"i":old}); rid=old
             else:
                 rid=c.execute(text("insert into roster(employee_id,date,shift_id,location_id) values (:e,:d,:s,:l) returning id"),{"e":b.employee_id,"d":b.date,"s":b.shift_id,"l":b.location_id}).scalar()
-            audit(c,u,"assign","roster",rid,None,serial(serial(b.model_dump())))
+            audit(c,u,"assign","roster",rid,None,serial(b.dict()))
         return dict(id=rid,ok=True)
 
     @app.get("/api/people/leaves")
@@ -202,7 +202,7 @@ def attach(app, ctx):
         if not one("select id from leave_type where id=:i",i=b.leave_type_id): raise HTTPException(422,"Unknown leave type")
         with engine.begin() as c:
             rid=c.execute(text("insert into leave_request(employee_id,leave_type_id,from_date,to_date,status,is_wfh,approver_id) values (:e,:t,:f,:to,'pending',:w,null) returning id"),{"e":b.employee_id,"t":b.leave_type_id,"f":b.from_date,"to":b.to_date,"w":b.is_wfh}).scalar()
-            audit(c,u,"create","leave_request",rid,None,b.model_dump())
+            audit(c,u,"create","leave_request",rid,None,serial(b.dict()))
         return dict(id=rid,status="pending")
 
     @app.post("/api/people/leaves/{rid}/decision")
