@@ -293,7 +293,7 @@ def replenish(C, Fq, Fb, bt, seed, engine):
         why += f" Gift boxes drive {kit_t[i] / tot[i] * 100:.0f}% of the need." if tot[i] and kit_t[i] / tot[i] >= .25 else ""
         why += f" Cheapest vendor price is up {chg[i] * 100:.0f}% in 3 months." if chg[i] and chg[i] >= .08 else ""
         sugg.append(dict(run_id=None, location_id=C.wh[pw[i]], sku_id=int(C.sk_id[s]), vendor_id=int(vid[i]), suggested_qty=int(qty[i]), approved_qty=None, unit_cost_paise=float(uc[i]), value_paise=int(qty[i] * uc[i]),
-                         on_hand=int(oh[i]), on_order=int(oo[i]), need_lead=int(need_lead[i]), need_cycle=int(need_cycle[i]), cover_days=float(round(min(cov[i], 999), 1)), lead_time_days=int(lead[i]), moq=int(moq[i]),
+                         on_hand=0, on_order=0, need_lead=int(need_lead[i]), need_cycle=int(need_cycle[i]), cover_days=float(round(min(cov[i], 999), 1)), lead_time_days=int(lead[i]), moq=int(moq[i]),
                          urgency=str(urg[i]), order_by=ob[i], reason=why[:200], status="open", created_at=NOW, decided_by=None, decided_at=None))
     req = [dict(run_id=None, location_id=C.wh[pw[i]], sku_id=int(C.sk_id[ps[i]]), need_qty=int(tot[i]), base_qty=int(base_t[i]), kit_qty=int(kit_t[i]), need_lead=int(need_lead[i])) for i in range(n)]
     return sugg, req
