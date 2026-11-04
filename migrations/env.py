@@ -2,9 +2,7 @@ from logging.config import fileConfig
 import os
 
 from alembic import context
-from sqlalchemy import create_engine, pool
-
-from dfh.db import normalize_database_url
+from dfh.db import get_engine, normalize_database_url
 from dfh.schema import metadata
 
 config = context.config
@@ -32,11 +30,7 @@ def run_migrations_offline():
 
 
 def run_migrations_online():
-    connectable = create_engine(
-        database_url(),
-        poolclass=pool.NullPool,
-        future=True,
-    )
+    connectable = get_engine(database_url())
     try:
         with connectable.connect() as connection:
             context.configure(
