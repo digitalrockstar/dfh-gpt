@@ -45,7 +45,7 @@ if ("serviceWorker" in navigator) addEventListener("load", () => navigator.servi
 function shell() {
   const u = S.user;
   mount(root, html`<div class="app"><aside class="side glass"><div class="brand"><div class="mark">DFH</div><div><b>Dry Fruit House</b><span>Operations Platform</span></div></div>
-    <nav class="nav">${NAV.map(([g, items]) => html`<div class="grp">${g}</div>${items.map(([id, l, n, built]) => html`<a href="#/${built ? id : "soon/" + id}" data-id="${id}"><span class="n">${n}</span>${l}${built ? "" : html`<span class="soon">SOON</span>`}</a>`)}`)}</nav>
+    <nav class="nav">${NAV.map(([g, items]) => html`<div class="grp">${g}</div>${items.filter(([id]) => id !== "platform" || ["ceo", "admin", "finance", "procurement", "hr"].includes(u.role)).map(([id, l, n, built]) => html`<a href="#/${built ? id : "soon/" + id}" data-id="${id}"><span class="n">${n}</span>${l}${built ? "" : html`<span class="soon">SOON</span>`}</a>`)}`)}</nav>
     <div class="me"><div class="av">${u.name[0]}</div><div class="t"><b>${u.name}</b><span>${ROLE[u.role] || u.role}</span></div><button class="icon" data-act="settings" aria-label="Appearance" title="Appearance">◐</button><button class="icon" data-act="out" aria-label="Sign out" title="Sign out">⏻</button></div></aside><main id="view"></main></div>`);
 }
 acts.out = logout;
