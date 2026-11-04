@@ -106,16 +106,74 @@ def attach(app, ctx, exceptions_for, ct_guard, filters):
         mix = an.q("select a.cat, sum(a.net) from agg a where a.store_id=? and a.date between ? and ? group by 1 order by 2 desc", [sid, s, e]); tot = sum(r[1] for r in mix) or 1
         trend = an.q("select a.date, sum(a.net) from agg a where a.store_id=? and a.date between ? and ? group by 1 order by 1", [sid, s, e])
         waste = one("select coalesce(sum(cost_paise),0) v from wastage_entry where location_id=:l and status!='rejected' and ts>=:a", l=sid, a=str(s))["v"]
-        bills = many("select invoice_no, business_date, net_paise, status from sale where store_id=:i order by created_at_device desc limit 8", i=sid)
+        pos = one("select count(*) bills, coalesce(sum(net_paise),0) sales_paise, coalesce(avg(net_paise),0) avg_bill_paise from sale where store_id=:i and business_date between :a and :b and status!='void'", i=sid, a=str(s), b=str(e))
+        pos_lines = one("select coalesce(sum(x.lines),0) line_count, coalesce(avg(x.lines),0) lines_per_bill from (select s.id, count(sl.id) lines from sale s left join sale_line sl on sl.sale_id=s.id where s.store_id=:i and s.business_date between :a and :b and s.status!='void' group by s.id) x", i=sid, a=str(s), b=str(e))
+        pos_returns = one("select count(*) n, coalesce(sum(refund_paise),0) v from sale_return where store_id=:i and status='approved' and created_at>=:a and created_at<:b", i=sid, a=str(s), b=str(e + timedelta(days=1)))
+        bills = many("select id, invoice_no, business_date, net_paise, status from sale where store_id=:i and status!='void' order by created_at_device desc limit 8", i=sid)
         mine = [x for x in exceptions_for(filters(u, "", "", "", "")) if x.get("type") in ("sync", "drop") and x.get("ref") == sid]
         return dict(store=dict(st, last_sync_at=str(st["last_sync_at"]) if st["last_sync_at"] else None, opened_on=str(st["opened_on"]) if st["opened_on"] else None),
                     days=(e - s).days + 1, current=cur, previous=prev, wastage_cost=int(waste),
+                    pos_summary=dict(source="POS transactions only", start=str(s), end=str(e), bills=int(pos["bills"]), sales_paise=int(pos["sales_paise"]),
+                                     avg_bill_paise=int(pos["avg_bill_paise"]), lines=int(pos_lines["line_count"]), lines_per_bill=float(pos_lines["lines_per_bill"]),
+                                     approved_returns=int(pos_returns["n"]), refunds_paise=int(pos_returns["v"]),
+                                     separate_from_parquet=True),
                     trend=[dict(date=str(r[0]), net=int(r[1])) for r in trend],
                     mix=[dict(code=r[0], name=an.cats[r[0]], net=int(r[1]), share=r[1] / tot) for r in mix],
                     top_skus=[dict(id=r[0], name=r[1], cat=r[2], qty=int(r[3]), net=int(r[4]), gm=(1 - r[5] / (r[4] / 1.05)) if r[4] else None) for r in top],
                     stockouts=[dict(sku_id=r[0], name=r[1], start=str(r[2]), end=str(r[3])) for r in so],
                     exceptions=mine, bills=[dict(b, business_date=str(b["business_date"])) for b in bills],
                     bills_note="Bill level data exists only for POS demo bills, so most stores show none. History is store by SKU by day.")
+
+    @app.get("/api/ct/bills")
+    def pos_bills(store_id: Optional[int] = None, start: str = "", end: str = "", q: str = "", page: int = 1, size: int = 25, u=Depends(ct_guard)):
+        ids = scoped_ids(u)
+        if store_id is not None:
+            check_store(u, store_id)
+            ids = [store_id]
+        page, size = max(1, page), max(5, min(size, 100))
+        where, params = ["s.status!='void'"], dict(lim=size, off=(page - 1) * size)
+        if ids is not None:
+            where.append("s.store_id in (%s)" % (",".join(str(int(x)) for x in ids) or "-1"))
+        if start:
+            try: date.fromisoformat(start)
+            except ValueError: raise HTTPException(422, "start must be YYYY-MM-DD")
+            where.append("s.business_date>=:start"); params["start"] = start
+        if end:
+            try: date.fromisoformat(end)
+            except ValueError: raise HTTPException(422, "end must be YYYY-MM-DD")
+            where.append("s.business_date<=:end"); params["end"] = end
+        if start and end and start > end: raise HTTPException(422, "start must not be after end")
+        if q.strip():
+            where.append("(lower(s.invoice_no) like :q or lower(l.name) like :q)")
+            params["q"] = "%" + q.strip().lower() + "%"
+        clause = " where " + " and ".join(where)
+        total = one("select count(*) n from sale s join location l on l.id=s.store_id" + clause, **params)["n"]
+        rows = many("select s.id,s.invoice_no,s.business_date,s.net_paise,s.status,s.store_id,l.name store_name from sale s join location l on l.id=s.store_id" + clause +
+                    " order by s.business_date desc,s.created_at_device desc limit :lim offset :off", **params)
+        return dict(total=total, page=page, size=size, rows=[dict(x, business_date=str(x["business_date"])) for x in rows],
+                    source="POS transactions only; excluded from aggregate Parquet KPIs")
+
+    @app.get("/api/ct/bills/{bill_id}")
+    def pos_bill_detail(bill_id: str, u=Depends(ct_guard)):
+        b = one("select s.id,s.invoice_no,s.store_id,s.business_date,s.created_at_device,s.received_at,s.status,s.gross_paise,s.discount_paise,s.tax_paise,s.net_paise,s.round_off_paise,s.void_reason,s.customer_id,l.code store_code,l.name store_name,au.name cashier "
+                "from sale s join location l on l.id=s.store_id left join app_user au on au.id=s.cashier_id where s.id=:i", i=bill_id)
+        if not b: raise HTTPException(404, "Bill not found")
+        ids = scoped_ids(u)
+        if ids is not None and b["store_id"] not in ids: raise HTTPException(403, "This bill is outside your scope")
+        lines = many("select sl.id,sl.sku_id,sk.code,sk.name,sk.base_uom,sl.qty,sl.unit_price_paise,sl.discount_paise,sl.tax_rate,sl.tax_paise,sl.net_paise "
+                     "from sale_line sl join sku sk on sk.id=sl.sku_id where sl.sale_id=:i order by sl.id", i=bill_id)
+        payments = many("select mode,amount_paise,status,ref from payment where sale_id=:i order by id", i=bill_id)
+        returns = many("select r.id,r.return_no,r.created_at,r.reason,r.status,r.refund_paise,coalesce(sum(rl.qty),0) returned_qty "
+                       "from sale_return r left join sale_return_line rl on rl.return_id=r.id where r.sale_id=:i group by r.id order by r.created_at desc", i=bill_id)
+        for r in returns: r["created_at"] = str(r["created_at"])
+        for x in lines:
+            x["qty_label"] = (f'{x["qty"] / 1000:g} kg' if x["base_uom"] == "g" else f'{x["qty"]} units')
+        approved_refunds = sum(int(r["refund_paise"] or 0) for r in returns if r["status"] == "approved")
+        b["business_date"] = str(b["business_date"]); b["created_at_device"] = str(b["created_at_device"])
+        b["received_at"] = str(b["received_at"]) if b["received_at"] else None
+        return dict(bill=b, lines=lines, payments=payments, returns=returns, approved_refunds_paise=approved_refunds,
+                    retained_value_paise=int(b["net_paise"] or 0) - approved_refunds,
+                    source="POS transaction detail; not added to aggregate Parquet history")
 
     @app.get("/api/ct/store/{sid}/sku/{kid}")
     def sku_drill(sid: int, kid: int, days: int = 60, u=Depends(ct_guard)):
