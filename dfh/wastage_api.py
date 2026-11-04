@@ -200,9 +200,9 @@ def attach(app, ctx):
                 if not bt: raise HTTPException(422, "That batch does not belong to this SKU")
                 bal = c.execute(text("select qty from stock_balance where location_id=:l and sku_id=:s and batch_id=:b"), dict(l=b.location_id, s=b.sku_id, b=b.batch_id)).fetchone()
                 if not bal or bal[0] < b.qty: raise HTTPException(422, f"Only {bal[0] if bal else 0} {unit} of that batch is recorded at this location")
-            r = c.execute(text("insert into wastage_entry(ts, location_id, sku_id, batch_id, qty, reason, cost_paise, entered_by, status, approved_by, photo_ref, vendor_claim) values (:t,:l,:s,:b,:q,:r,:c,:u,:st,:ap,null,0)"),
+            r = c.execute(text("insert into wastage_entry(ts, location_id, sku_id, batch_id, qty, reason, cost_paise, entered_by, status, approved_by, photo_ref, vendor_claim) values (:t,:l,:s,:b,:q,:r,:c,:u,:st,:ap,null,0) returning id"),
                           dict(t=NOW, l=b.location_id, s=b.sku_id, b=b.batch_id, q=b.qty, r=b.reason, c=cost, u=u["id"], st=status, ap=u["id"] if status == "approved" and u["role"] in APPROVE else None))
-            eid = r.lastrowid
+            eid = r.scalar_one()
             if b.batch_id: stockpost.post(c, NOW, b.location_id, b.sku_id, b.batch_id, -b.qty, "wastage", "wastage_entry", eid, u["id"])
             audit(c, u, "create", "wastage_entry", eid, None, dict(location_id=b.location_id, sku_id=b.sku_id, qty=b.qty, reason=b.reason, cost_paise=cost, status=status, note=b.note))
         return dict(id=eid, cost_paise=cost, status=status)

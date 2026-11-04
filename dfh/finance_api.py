@@ -119,8 +119,8 @@ def attach(app, ctx):
 
     def post_jv(c, ent, kind, ref, narr, ls):
         e = c.execute(text("select code from legal_entity where id=:i"), dict(i=ent)).scalar()
-        jid = c.execute(text("insert into journal_entry(jv_no, date, entity_id, source_doc_type, source_doc_id, narration) values (:n,:d,:e,:k,:r,:m)"),
-                        dict(n=f"{e}/{kind}/{ref}", d=str(END), e=ent, k=kind.lower(), r=str(ref), m=narr)).lastrowid
+        jid = c.execute(text("insert into journal_entry(jv_no, date, entity_id, source_doc_type, source_doc_id, narration) values (:n,:d,:e,:k,:r,:m) returning id"),
+                        dict(n=f"{e}/{kind}/{ref}", d=str(END), e=ent, k=kind.lower(), r=str(ref), m=narr)).scalar_one()
         for a, dr, cr in ls: c.execute(text("insert into journal_line(jv_id, account_code, debit_paise, credit_paise, location_id) values (:j,:a,:d,:c,null)"), dict(j=jid, a=a, d=dr, c=cr))
 
     @app.post("/api/finance/recon/{iid}/resolve")
