@@ -246,7 +246,7 @@ def attach(app, ctx):
         if not one("select id from department where id=:i",i=b.department_id): raise HTTPException(422,"Unknown department")
         with engine.begin() as c:
             jid=c.execute(text("insert into job_posting(title,department_id,location_id,status,posted_on,closes_on,description) values (:t,:d,:l,'open',:p,:c,:x) returning id"),{"t":b.title.strip(),"d":b.department_id,"l":b.location_id,"p":b.posted_on,"c":b.closes_on,"x":b.description}).scalar()
-            audit(c,u,"create","job_posting",jid,None,b.model_dump())
+            audit(c,u,"create","job_posting",jid,None,serial(b.dict()))
         return dict(id=jid,status="open")
 
     @app.get("/api/people/applicants")
