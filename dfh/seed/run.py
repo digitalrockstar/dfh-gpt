@@ -6,7 +6,7 @@ from sqlalchemy import insert, select
 from ..schema import metadata
 from ..db import get_engine
 from .masters import build_masters
-from . import history, inventory, wastage, procurement, pos, finance, crm
+from . import history, inventory, wastage, procurement, pos, finance, crm, people
 from ..demand import model as demand
 
 
@@ -50,6 +50,7 @@ def main():
                 for i in range(0, len(rows), 5000):
                     c.execute(insert(t), rows[i:i + 5000])
     print(f"masters loaded in {time.time() - t0:.1f}s")
+    print("people:", people.run(eng, a.seed))
     if not a.no_history:
         t1 = time.time()
         print("history:", history.run(eng, a.months, a.seed, a.data), f"{time.time() - t1:.1f}s")
