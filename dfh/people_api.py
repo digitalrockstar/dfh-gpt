@@ -100,7 +100,7 @@ def attach(app, ctx):
         staff = one("select count(*) n" + base, **params)["n"]
         today_att = one("select count(*) n, sum(case when status in ('present','late','half_day') then 1 else 0 end) present, sum(case when status='absent' then 1 else 0 end) absent from attendance a join employee e on e.id=a.employee_id where a.date=:d" + extra.replace("e.location_id", "e.location_id"), d=today, **params)
         pending = one("select count(*) n from leave_request r join employee e on e.id=r.employee_id where r.status='pending'" + extra, **params)["n"]
-        onboarding = one("select count(*) n from onboarding_task t join employee e on e.id=t.employee_id where t.done_at is null", **{})["n"] if u["role"] in HR else 0
+        onboarding = one("select count(*) n from onboarding_task t join employee e on e.id=t.employee_id where t.done_at is null" + extra, **params)["n"]
         jobs = one("select count(*) n from job_posting where status='open'")["n"]
         recent = many("select e.id,e.emp_code,e.name,d.name department,g.title designation,l.name location,e.join_date from employee e join department d on d.id=e.department_id join designation g on g.id=e.designation_id join location l on l.id=e.location_id where e.status='active'" + extra + " order by e.join_date desc,e.id desc limit 6", **params)
         return dict(active=staff, attendance=dict(present=int(today_att["present"] or 0), absent=int(today_att["absent"] or 0), records=int(today_att["n"] or 0)),
@@ -171,7 +171,7 @@ def attach(app, ctx):
         extra,params=scoped(u); params.update(start=start,end=end)
         where=" where r.date between :start and :end"+extra
         if location_id: where+=" and e.location_id=:loc";params["loc"]=location_id
-        return many("select r.id,r.date,e.id employee_id,e.emp_code,e.name,d.name department,l.id location_id,l.name location,s.code shift_code,s.start_time,s.end_time from roster r join employee e on e.id=r.employee_id join department d on d.id=e.department_id join location l on l.id=r.location_id join shift s on s.id=r.shift_id"+where+" order by r.date,l.name,e.name",**params)
+        return many("select r.id,r.date,e.id employee_id,e.emp_code,e.name,d.name department,l.id location_id,l.name location,s.code shift_code,s.start_time,s.end_time from roster r join employee e on e.id=r.employee_id join department d on d.id=e.department_id join location l on l.id=r.location_id join shift s on s.id=r.shift_id"+where+" order by r.date,l.name,e.name limit 600",**params)
 
     @app.post("/api/people/roster")
     def assign_roster(b: RosterIn, u=Depends(hr)):
