@@ -4,6 +4,7 @@ from datetime import datetime, date, timedelta
 import duckdb
 from sqlalchemy import text, insert
 from ..schema import metadata
+from ..sql_dialect import days_between, date_plus_literal_days
 
 NOW = datetime(2026, 10, 31, 9, 0)
 START = datetime(2026, 5, 1)
@@ -40,8 +41,10 @@ def run(engine, seed=42, outdir="data"):
     with engine.connect() as c:
         bysku = {}
         for r in c.execute(text("select id, sku_id from batch")): bysku.setdefault(r[1], []).append({"id": r[0]})
-        near = c.execute(text("select b.location_id, b.batch_id, b.qty, cast(julianday(t.expiry_date) - julianday(:d) as integer) from stock_balance b join batch t on t.id=b.batch_id join location l on l.id=b.location_id "
-                              "where l.type='store' and b.qty>0 and t.expiry_date>=:d and t.expiry_date<=date(:d, '+30 days') order by b.location_id, b.batch_id"), dict(d=str(NOW.date()))).fetchall()
+        days_expr = days_between(engine, "t.expiry_date", ":d")
+        expiry_limit = date_plus_literal_days(engine, ":d", 30)
+        near = c.execute(text("select b.location_id, b.batch_id, b.qty, " + days_expr + " from stock_balance b join batch t on t.id=b.batch_id join location l on l.id=b.location_id "
+                              "where l.type='store' and b.qty>0 and t.expiry_date>=:d and t.expiry_date<=" + expiry_limit + " order by b.location_id, b.batch_id"), dict(d=str(NOW.date()))).fetchall()
     batches, balrows, marks = [], [], []
     for loc, b, q, left in near:
         marks.append(dict(location_id=loc, batch_id=b, suggested_pct=40.0 if left <= 7 else 30.0 if left <= 15 else 20.0, reason=f"{left} days to expiry, {q} in stock", created_at=NOW, status="open"))
