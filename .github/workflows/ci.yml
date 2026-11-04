@@ -17,8 +17,23 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: dfh_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d dfh_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       DFH_DEMO_NOW: "2026-10-31T09:00:00"
+      DFH_TEST_POSTGRES_URL: postgresql+psycopg://postgres:postgres@localhost:5432/dfh_test
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
