@@ -278,7 +278,7 @@ def attach(app, ctx):
         if b.month.day!=1:
             raise HTTPException(422,"FX month must be the first day of a month")
         old=one("select id,rate_to_inr,assumed from fx_rate where currency=:c and month=:m",c=b.currency.upper(),m=b.month)
-        values=dict(currency=b.currency.upper(),month=b.month,rate_to_inr=b.rate_to_inr,assumed=b.assumed)
+        values=dict(currency=b.currency.upper(),month=b.month.isoformat(),rate_to_inr=b.rate_to_inr,assumed=b.assumed)
         with engine.begin() as c:
             if old:
                 c.execute(__import__("sqlalchemy").text("update fx_rate set rate_to_inr=:r,assumed=:a where id=:i"),dict(r=b.rate_to_inr,a=b.assumed,i=old["id"]))
