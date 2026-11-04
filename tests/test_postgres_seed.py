@@ -31,7 +31,7 @@ def test_seeded_application_routes_on_postgresql():
             ("/api/inv/expiry?days=60", "items"),
             ("/api/procurement/shipments", "items"),
             ("/api/wastage/expiry?window=60", "rows"),
-            ("/api/finance/summary", "revenue"),
+            ("/api/finance/summary", "cash"),
         ]
         for path, expected_key in checks:
             response = client.get(path, headers=headers)
