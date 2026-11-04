@@ -68,7 +68,7 @@ def attach(app, ctx):
     @app.get("/api/wastage/summary")
     def summary(days: int = 30, region: str = "", city: str = "", tier: str = "", u=Depends(view)):
         sp, has, s, e = span(days); w, p = where(u, "l", region, city, tier)
-        base = ("select coalesce(sum(x.cost_paise),0) cost, count(*) n, coalesce(sum(case when r.is_controllable=1 then x.cost_paise else 0 end),0) ctl from wastage_entry x "
+        base = ("select coalesce(sum(x.cost_paise),0) cost, count(*) n, coalesce(sum(case when r.is_controllable=true then x.cost_paise else 0 end),0) ctl from wastage_entry x "
                 "join location l on l.id=x.location_id join wastage_reason r on r.code=x.reason where x.status!='rejected' and x.ts>=:a and x.ts<:b" + w)
         cur = one(base, a=sp["s"], b=sp["e"], **p); prev = one(base, a=sp["ps"], b=sp["pe"], **p) if has else None
         st = one("select coalesce(sum(x.cost_paise),0) cost from wastage_entry x join location l on l.id=x.location_id where l.type='store' and x.status!='rejected' and x.ts>=:a and x.ts<:b" + w, a=sp["s"], b=sp["e"], **p)
@@ -100,7 +100,7 @@ def attach(app, ctx):
     @app.get("/api/wastage/trend")
     def trend(days: int = 90, region: str = "", city: str = "", tier: str = "", u=Depends(view)):
         sp, has, s, e = span(days); w, p = where(u, "l", region, city, tier)
-        rows = many("select substr(x.ts,1,10) d, sum(x.cost_paise) c, sum(case when r.is_controllable=1 then x.cost_paise else 0 end) k from wastage_entry x join location l on l.id=x.location_id join wastage_reason r on r.code=x.reason "
+        rows = many("select substr(x.ts,1,10) d, sum(x.cost_paise) c, sum(case when r.is_controllable=true then x.cost_paise else 0 end) k from wastage_entry x join location l on l.id=x.location_id join wastage_reason r on r.code=x.reason "
                     "where x.status!='rejected' and x.ts>=:a and x.ts<:b" + w + " group by 1 order by 1", a=sp["s"], b=sp["e"], **p)
         if days <= 60: return [dict(date=r["d"], cost=int(r["c"]), controllable=int(r["k"])) for r in rows]
         out = {}
